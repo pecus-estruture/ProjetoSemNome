@@ -14,8 +14,8 @@ Abra `http://localhost:3000`.
 
 ## Variáveis de ambiente
 
-- `PNCP_API_BASE_URL` (ou `PNCP_API_URL`): base da API de consulta do PNCP. O padrão é `https://pncp.gov.br/api/consulta/v1`.
-- `PNCP_MODALIDADES`: lista separada por vírgulas das modalidades a consultar. O padrão percorre as modalidades 1 a 14, pois o endpoint de publicações exige `codigoModalidadeContratacao`.
+- `PNCP_API_BASE_URL` (ou `PNCP_API_URL`): base da API de consulta do PNCP. O padrão é `https://pncp.gov.br/api/consulta`. A busca usa `GET /v1/contratacoes/atualizacao`, `codigoModalidadeContratacao=6` (Pregão Eletrônico), UF e `pagina=1`.
+- `PNCP_DATA_API_BASE_URL` (ou `PNCP_API_DATA_BASE_URL`): base para itens, resultados e histórico. O padrão é derivado como `https://pncp.gov.br/api/pncp/v1`.
 - `NVIDIA_API_KEY`: chave NVIDIA para resumir cada ocorrência em uma frase. `NVIDIA_API_URL` (ou `NVIDIA_API_BASE_URL`) e `NVIDIA_MODEL` são opcionais.
 - `GOOGLE_SHEETS_WEBHOOK_URL` (ou `GOOGLE_SHEETS_URL`): endpoint que recebe `POST` com `{ action, filtros, leads }` e responde a `GET` com os leads salvos. Sem a variável, a aplicação continua funcionando apenas em memória.
 - `TELEGRAM_API_BASE_URL` (ou `TELEGRAM_API_URL`), `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`: envio do resumo da pesquisa para o Telegram.
