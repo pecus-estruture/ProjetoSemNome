@@ -1,0 +1,38 @@
+# PECUS Consultoria em Licitações
+
+Aplicação Node.js + Express para pesquisar resultados públicos do PNCP, identificar fornecedores não vencedores e gerar uma visão de prospecção comercial.
+
+## Executar localmente
+
+```bash
+npm install
+cp .env.example .env
+npm start
+```
+
+Abra `http://localhost:3000`.
+
+## Variáveis de ambiente
+
+- `PNCP_API_BASE_URL` (ou `PNCP_API_URL`): base da API de consulta do PNCP. O padrão é `https://pncp.gov.br/api/consulta/v1`.
+- `PNCP_MODALIDADES`: lista separada por vírgulas das modalidades a consultar. O padrão percorre as modalidades 1 a 14, pois o endpoint de publicações exige `codigoModalidadeContratacao`.
+- `NVIDIA_API_KEY`: chave NVIDIA para resumir cada ocorrência em uma frase. `NVIDIA_API_URL` (ou `NVIDIA_API_BASE_URL`) e `NVIDIA_MODEL` são opcionais.
+- `GOOGLE_SHEETS_WEBHOOK_URL` (ou `GOOGLE_SHEETS_URL`): endpoint que recebe `POST` com `{ action, filtros, leads }` e responde a `GET` com os leads salvos. Sem a variável, a aplicação continua funcionando apenas em memória.
+- `TELEGRAM_API_BASE_URL` (ou `TELEGRAM_API_URL`), `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`: envio do resumo da pesquisa para o Telegram.
+- `PORT`: porta HTTP, definida automaticamente pelo Render quando disponível.
+- `MAX_LEADS` e `PNCP_MAX_CONTRATACOES`: limites operacionais opcionais.
+
+O webhook da planilha deve aceitar o lote enviado pela aplicação. Cada lead contém fornecedor, identificação, objeto, classificação, ocorrência, resumo da IA, órgão, data e link do PNCP. A implementação do webhook pode fazer `upsert` usando o campo `id`.
+
+## Deploy no Render
+
+Crie um Web Service apontando para este repositório, com:
+
+- Build command: `npm install`
+- Start command: `npm start`
+
+Configure as variáveis do `.env.example` no painel do Render. O código não depende de arquivo `.env` no Render: todas as chamadas externas usam `process.env` e o serviço escuta a porta fornecida por `process.env.PORT`. Depois, crie o secret `RENDER_URL` no GitHub Actions com a URL pública do serviço, por exemplo `https://sua-aplicacao.onrender.com`.
+
+## Workflow diário
+
+`.github/workflows/cron-diario.yml` roda às 10:00 UTC (07:00 em Brasília), envia `UF=GO` e pesquisa o dia anterior. Se `CRON_SECRET` estiver definido no GitHub e no Render, o workflow também envia o header `Authorization: Bearer ...`.
