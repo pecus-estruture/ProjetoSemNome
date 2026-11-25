@@ -15,7 +15,8 @@ const env = (primary, ...aliases) => {
 };
 
 const PORT = Number(process.env.PORT || 3000);
-const PNCP_API_BASE_URL = (env("PNCP_API_BASE_URL", "PNCP_API_URL") || "https://pncp.gov.br/api/consulta/v1").replace(/\/+$/, "");
+const PNCP_API_BASE_URL = (env("PNCP_API_BASE_URL", "PNCP_API_URL") || "https://pncp.gov.br/api/consulta").replace(/\/+$/, "");
+const PNCP_DATA_API_BASE_URL = (env("PNCP_DATA_API_BASE_URL", "PNCP_API_DATA_BASE_URL") || `${new URL(PNCP_API_BASE_URL).origin}/api/pncp/v1`).replace(/\/+$/, "");
 const NVIDIA_API_URL = env("NVIDIA_API_URL", "NVIDIA_API_BASE_URL") || "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_API_KEY = env("NVIDIA_API_KEY");
 const NVIDIA_MODEL = env("NVIDIA_MODEL") || "meta/llama-3.1-8b-instruct";
@@ -25,10 +26,7 @@ const TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID");
 const MAX_LEADS = Math.max(1, Number(process.env.MAX_LEADS || 200));
 const MAX_CONTRATACOES = Math.max(1, Number(process.env.PNCP_MAX_CONTRATACOES || 100));
-const PNCP_MODALIDADES = (process.env.PNCP_MODALIDADES || "1,2,3,4,5,6,7,8,9,10,11,12,13,14")
-  .split(",")
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isInteger(value) && value > 0);
+const PNCP_MODALIDADE_PREGAO_ELETRONICO = 6;
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -187,10 +185,10 @@ function getContractIdentity(contract) {
   return { cnpj, ano: String(ano), sequencial: String(sequencial) };
 }
 
-async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, maxItems = Infinity } = {}) {
+async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, maxItems = Infinity, baseUrl = PNCP_API_BASE_URL } = {}) {
   const output = [];
   for (let page = 1; page <= maxPages && output.length < maxItems; page += 1) {
-    const url = makeUrl(PNCP_API_BASE_URL, pathname, {
+    const url = makeUrl(baseUrl, pathname, {
       ...params,
       pagina: page,
       tamanhoPagina: pageSize
@@ -211,7 +209,8 @@ async function fetchItems(identity, contract) {
   return fetchPaginated(`/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/itens`, params, {
     pageSize: 50,
     maxPages: 20,
-    maxItems: 2000
+    maxItems: 2000,
+    baseUrl: PNCP_DATA_API_BASE_URL
   });
 }
 
@@ -220,7 +219,7 @@ async function fetchResults(identity, item) {
   const numeroItem = firstValue(item, ["numeroItem", "itemNumero", "numero"]);
   if (!numeroItem) return [];
   const url = makeUrl(
-    PNCP_API_BASE_URL,
+    PNCP_DATA_API_BASE_URL,
     `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/itens/${numeroItem}/resultados`
   );
   const { body } = await request(url);
@@ -229,7 +228,7 @@ async function fetchResults(identity, item) {
 
 async function fetchHistory(identity) {
   try {
-    const url = makeUrl(PNCP_API_BASE_URL, `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/historico`);
+    const url = makeUrl(PNCP_DATA_API_BASE_URL, `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/historico`);
     const { body } = await request(url);
     return asList(body, ["historico", "historicos", "logs"]);
   } catch (error) {
@@ -350,6 +349,21 @@ function fallbackSummary(lead) {
   return "Não venceu o item conforme a ocorrência registrada no PNCP.";
 }
 
+function purchaseHasResultOrIsFinished(contract) {
+  const status = String(firstValue(contract, [
+    "situacaoCompraNome",
+    "situacaoNome",
+    "status",
+    "faseCompra",
+    "situacao"
+  ]) || "").toLocaleLowerCase("pt-BR");
+  const statusId = Number(firstValue(contract, ["situacaoCompraId", "situacaoId"]));
+  const homologatedValue = Number(firstValue(contract, ["valorTotalHomologado", "valorHomologado"]));
+  const hasResultFlag = Boolean(firstValue(contract, ["temResultado", "temResultados", "possuiResultado"]));
+
+  return hasResultFlag || homologatedValue > 0 || statusId === 2 || /encerrad|homologad|finalizad|adjudicad|concluíd|concluid/.test(status);
+}
+
 async function summarizeWithNvidia(lead) {
   if (!NVIDIA_API_KEY) return fallbackSummary(lead);
 
@@ -391,37 +405,20 @@ async function summarizeWithNvidia(lead) {
 }
 
 async function searchPncp(filters) {
-  const limitPerModality = Math.max(10, Math.ceil(MAX_CONTRATACOES / Math.max(PNCP_MODALIDADES.length, 1)));
-  let successfulModalities = 0;
-  let lastError;
-  const contractsByModality = await mapWithConcurrency(PNCP_MODALIDADES, 3, async (codigoModalidadeContratacao) => {
-    try {
-      const contracts = await fetchPaginated("/contratacoes/publicacao", {
-        dataInicial: filters.dataInicial.replaceAll("-", ""),
-        dataFinal: filters.dataFinal.replaceAll("-", ""),
-        codigoModalidadeContratacao,
-        uf: filters.uf
-      }, {
-        pageSize: 50,
-        maxPages: Math.ceil(limitPerModality / 50),
-        maxItems: limitPerModality
-      });
-      successfulModalities += 1;
-      return contracts;
-    } catch (error) {
-      lastError = error;
-      console.warn(`Modalidade ${codigoModalidadeContratacao} indisponível:`, error.message);
-      return [];
-    }
+  const contracts = await fetchPaginated("/v1/contratacoes/atualizacao", {
+    dataInicial: filters.dataInicial.replaceAll("-", ""),
+    dataFinal: filters.dataFinal.replaceAll("-", ""),
+    codigoModalidadeContratacao: PNCP_MODALIDADE_PREGAO_ELETRONICO,
+    uf: filters.uf
+  }, {
+    pageSize: 50,
+    maxPages: 1,
+    maxItems: MAX_CONTRATACOES
   });
 
-  if (!successfulModalities && lastError) throw lastError;
-  const contracts = [...new Map(contractsByModality.flat().map((contract) => {
-    const identity = getContractIdentity(contract);
-    return [identity ? `${identity.cnpj}-${identity.ano}-${identity.sequencial}` : JSON.stringify(contract), contract];
-  })).values()].slice(0, MAX_CONTRATACOES);
+  const eligibleContracts = contracts.filter(purchaseHasResultOrIsFinished);
 
-  const contractResults = await mapWithConcurrency(contracts, 3, async (contract) => {
+  const contractResults = await mapWithConcurrency(eligibleContracts, 3, async (contract) => {
     const identity = getContractIdentity(contract);
     if (!identity) return [];
 
@@ -512,6 +509,7 @@ app.get("/api/health", (_req, res) => {
     timestamp: new Date().toISOString(),
     config: {
       pncp: Boolean(PNCP_API_BASE_URL),
+      pncpData: Boolean(PNCP_DATA_API_BASE_URL),
       nvidia: Boolean(NVIDIA_API_KEY),
       googleSheets: Boolean(GOOGLE_SHEETS_WEBHOOK_URL),
       telegram: Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID)
