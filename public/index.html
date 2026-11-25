@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B192C" />
+    <title>PECUS | Consultoria em Licitações</title>
+    <style>
+      :root {
+        --navy-950: #07111f;
+        --navy-900: #0b192c;
+        --navy-800: #10243e;
+        --navy-700: #193452;
+        --gold: #d4af37;
+        --gold-soft: #f0d982;
+        --ink: #eef4fb;
+        --muted: #9eb0c5;
+        --line: rgba(184, 204, 226, 0.14);
+        --card: rgba(16, 36, 62, 0.78);
+        --success: #69d39a;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 82% 0%, rgba(212, 175, 55, 0.13), transparent 27rem),
+          linear-gradient(140deg, var(--navy-950), var(--navy-900) 48%, #081727);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: .18;
+        background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, black, transparent 80%);
+      }
+
+      .shell { width: min(1440px, calc(100% - 40px)); margin: 0 auto; position: relative; }
+      .topbar { padding: 28px 0 22px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+      .brand { display: flex; align-items: center; gap: 14px; }
+      .brand-mark { width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid rgba(212,175,55,.55); border-radius: 15px; background: linear-gradient(145deg, rgba(212,175,55,.18), rgba(212,175,55,.05)); box-shadow: 0 12px 30px rgba(0,0,0,.18); }
+      .brand-mark svg { width: 28px; fill: var(--gold); }
+      .eyebrow { margin: 0 0 3px; color: var(--gold-soft); font-size: .7rem; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: clamp(1.05rem, 2vw, 1.35rem); letter-spacing: -.02em; }
+      .top-note { color: var(--muted); font-size: .87rem; text-align: right; }
+      main { padding: 20px 0 54px; }
+      .hero { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin: 22px 0 24px; }
+      .hero h2 { max-width: 760px; margin: 0 0 8px; font-size: clamp(1.8rem, 4vw, 3.2rem); line-height: 1.03; letter-spacing: -.055em; }
+      .hero p { max-width: 700px; margin: 0; color: var(--muted); line-height: 1.65; }
+      .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; color: #cde8d9; background: rgba(105,211,154,.09); font-size: .78rem; white-space: nowrap; }
+      .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 5px rgba(105,211,154,.12); }
+      .card { border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(145deg, rgba(22,47,78,.88), var(--card)); box-shadow: 0 18px 60px rgba(0,0,0,.17); backdrop-filter: blur(16px); }
+      .filters { padding: 20px; }
+      .filters-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
+      .filters-head h3, .leads-head h3 { margin: 0; font-size: 1rem; }
+      .filters-head span { color: var(--muted); font-size: .82rem; }
+      .filter-grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 13px; align-items: end; }
+      label { display: grid; gap: 8px; color: var(--muted); font-size: .76rem; font-weight: 700; letter-spacing: .02em; }
+      input, select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid var(--line); border-radius: 12px; outline: none; color: var(--ink); background: rgba(7,17,31,.58); font: inherit; transition: border-color .2s, box-shadow .2s; }
+      input:focus, select:focus { border-color: rgba(212,175,55,.75); box-shadow: 0 0 0 4px rgba(212,175,55,.11); }
+      select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--gold) 50%), linear-gradient(135deg, var(--gold) 50%, transparent 50%); background-position: calc(100% - 17px) 20px, calc(100% - 12px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
+      option { color: #10243e; }
+      .primary-button, .secondary-button { min-height: 46px; border: 0; border-radius: 12px; padding: 0 18px; cursor: pointer; font: inherit; font-weight: 800; transition: transform .2s, box-shadow .2s, opacity .2s; }
+      .primary-button { color: #171205; background: linear-gradient(135deg, var(--gold-soft), var(--gold)); box-shadow: 0 10px 25px rgba(212,175,55,.18); }
+      .secondary-button { color: var(--gold-soft); border: 1px solid rgba(212,175,55,.3); background: rgba(212,175,55,.08); font-size: .78rem; }
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity: .55; cursor: wait; transform: none; }
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin: 16px 0; }
+      .metric { padding: 18px 20px; }
+      .metric small { color: var(--muted); font-size: .74rem; }
+      .metric strong { display: block; margin-top: 7px; color: var(--gold-soft); font-size: 1.65rem; letter-spacing: -.04em; }
+      .leads-card { overflow: hidden; }
+      .leads-head { padding: 20px; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); }
+      .leads-count { color: var(--muted); font-size: .82rem; }
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; min-width: 960px; border-collapse: collapse; }
+      th { color: var(--gold-soft); background: rgba(7,17,31,.24); font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-align: left; text-transform: uppercase; }
+      th, td { padding: 17px 20px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      td { color: #dce7f2; font-size: .86rem; line-height: 1.45; }
+      tbody tr:hover { background: rgba(212,175,55,.035); }
+      .supplier { color: #fff; font-weight: 800; }
+      .subtle { display: block; margin-top: 5px; color: var(--muted); font-size: .74rem; }
+      .ai-summary { color: #f6e7a5; }
+      .tag { display: inline-flex; padding: 5px 8px; border: 1px solid rgba(212,175,55,.25); border-radius: 999px; color: var(--gold-soft); background: rgba(212,175,55,.08); font-size: .72rem; white-space: nowrap; }
+      .empty { padding: 58px 20px; color: var(--muted); text-align: center; }
+      .empty strong { display: block; margin-bottom: 6px; color: var(--ink); }
+      .loading-row { color: var(--muted); text-align: center; }
+      .toast { position: fixed; right: 22px; bottom: 22px; z-index: 5; max-width: min(420px, calc(100% - 44px)); padding: 13px 16px; border: 1px solid rgba(212,175,55,.32); border-radius: 12px; color: var(--ink); background: #10243e; box-shadow: 0 15px 35px rgba(0,0,0,.26); opacity: 0; transform: translateY(15px); pointer-events: none; transition: .25s; font-size: .85rem; }
+      .toast.show { opacity: 1; transform: translateY(0); }
+      .toast.error { border-color: rgba(240,120,120,.45); }
+      footer { padding: 0 0 30px; color: var(--muted); font-size: .75rem; text-align: center; }
+      @media (max-width: 860px) {
+        .topbar, .hero { align-items: start; flex-direction: column; }
+        .top-note { text-align: left; }
+        .filter-grid { grid-template-columns: 1fr 1fr; }
+        .filter-grid .primary-button { width: 100%; }
+      }
+      @media (max-width: 540px) {
+        .shell { width: min(100% - 24px, 1440px); }
+        .filter-grid, .metrics { grid-template-columns: 1fr; }
+        .filters, .leads-head { padding: 16px; }
+        .hero h2 { font-size: 2.2rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><path d="M10 34.5h28v4H10zM13 30h22v3H13zm2-18h18l-2.3 4H17.3L15 12zm2.4 7h15.2l-1.6 8H19l-1.6-8zM11 10h26v3H11z"/><circle cx="24" cy="8" r="3"/></svg>
+          </div>
+          <div>
+            <p class="eyebrow">PECUS</p>
+            <h1>Consultoria em Licitações</h1>
+          </div>
+        </div>
+        <div class="top-note">Inteligência comercial para oportunidades públicas</div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <h2>Encontre empresas que chegaram perto da vitória.</h2>
+            <p>Consulte resultados do PNCP, entenda por que cada fornecedor perdeu e transforme o dado em uma abordagem comercial objetiva.</p>
+          </div>
+          <div class="status-pill"><span class="status-dot"></span> Painel operacional</div>
+        </section>
+
+        <section class="card filters">
+          <div class="filters-head">
+            <h3>Nova pesquisa</h3>
+            <span>O período máximo é de 31 dias</span>
+          </div>
+          <form id="searchForm" class="filter-grid">
+            <label>Estado (UF)
+              <select id="uf" name="uf">
+                <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option selected>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
+              </select>
+            </label>
+            <label>Data inicial
+              <input id="dataInicial" name="dataInicial" type="date" required />
+            </label>
+            <label>Data final
+              <input id="dataFinal" name="dataFinal" type="date" required />
+            </label>
+            <button class="primary-button" type="submit" id="searchButton">Pesquisar Agora</button>
+          </form>
+        </section>
+
+        <section class="metrics" aria-label="Resumo dos leads">
+          <div class="card metric"><small>Leads exibidos</small><strong id="metricLeads">—</strong></div>
+          <div class="card metric"><small>Estado consultado</small><strong id="metricUf">GO</strong></div>
+          <div class="card metric"><small>Última atualização</small><strong id="metricUpdated">—</strong></div>
+        </section>
+
+        <section class="card leads-card">
+          <div class="leads-head">
+            <h3>Leads encontrados</h3>
+            <span class="leads-count" id="leadsCount">Carregando leads salvos…</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Fornecedor</th><th>Oportunidade</th><th>Ocorrência</th><th>Resumo da IA</th><th>Ação</th></tr>
+              </thead>
+              <tbody id="leadsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <footer>PECUS Consultoria em Licitações · Dados públicos do PNCP</footer>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const form = document.querySelector('#searchForm');
+      const body = document.querySelector('#leadsBody');
+      const button = document.querySelector('#searchButton');
+      const toast = document.querySelector('#toast');
+      let toastTimer;
+      let leads = [];
+
+      const pad = value => String(value).padStart(2, '0');
+      const isoDate = date => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[character]));
+      const field = (lead, ...keys) => keys.map(key => lead?.[key]).find(value => value !== undefined && value !== null && String(value).trim() !== '') || '';
+      const dateLabel = value => {
+        if (!value) return '—';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString('pt-BR');
+      };
+
+      function showToast(message, isError = false) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.className = `toast show${isError ? ' error' : ''}`;
+        toastTimer = setTimeout(() => { toast.className = 'toast'; }, 4200);
+      }
+
+      function approachMessage(lead) {
+        const supplier = field(lead, 'fornecedor', 'supplierName', 'nomeRazaoSocialFornecedor') || 'sua empresa';
+        const object = field(lead, 'objeto', 'object', 'descricao') || 'uma contratação pública';
+        const reason = field(lead, 'resumoIA', 'aiSummary', 'ocorrencia', 'reason') || 'o resultado não foi vencedor';
+        return `Olá, ${supplier}! Acompanhamos a disputa de ${object} e vimos que ${reason.toLowerCase()} na última oportunidade. A PECUS Consultoria em Licitações pode apoiar sua preparação para aumentar as chances nos próximos certames. Podemos conversar?`;
+      }
+
+      async function copyApproach(index) {
+        try {
+          await navigator.clipboard.writeText(approachMessage(leads[index]));
+          showToast('Mensagem de abordagem copiada.');
+        } catch {
+          showToast('Não foi possível copiar automaticamente.', true);
+        }
+      }
+
+      function renderLeads(nextLeads = []) {
+        leads = Array.isArray(nextLeads) ? nextLeads : [];
+        document.querySelector('#metricLeads').textContent = leads.length;
+        document.querySelector('#leadsCount').textContent = leads.length ? `${leads.length} oportunidade${leads.length === 1 ? '' : 's'} encontrada${leads.length === 1 ? '' : 's'}` : 'Nenhum lead no período';
+
+        if (!leads.length) {
+          body.innerHTML = '<tr><td colspan="5"><div class="empty"><strong>Nenhum lead encontrado ainda.</strong>Faça uma pesquisa para carregar fornecedores não vencedores.</div></td></tr>';
+          return;
+        }
+
+        body.innerHTML = leads.map((lead, index) => {
+          const supplier = field(lead, 'fornecedor', 'supplierName', 'nomeRazaoSocialFornecedor') || 'Fornecedor não informado';
+          const object = field(lead, 'objeto', 'object', 'descricao') || 'Objeto não informado';
+          const occurrence = field(lead, 'ocorrencia', 'occurrence', 'reason', 'motivo') || 'Ocorrência não informada';
+          const summary = field(lead, 'resumoIA', 'aiSummary', 'resumo') || occurrence;
+          const cnpj = field(lead, 'cnpj', 'niFornecedor');
+          const classification = field(lead, 'classificacao', 'classification');
+          return `<tr>
+            <td><span class="supplier">${escapeHtml(supplier)}</span>${cnpj ? `<span class="subtle">${escapeHtml(cnpj)}</span>` : ''}</td>
+            <td>${escapeHtml(object)}<span class="subtle">${escapeHtml(field(lead, 'orgao', 'agency') || 'Órgão não informado')} · ${escapeHtml(dateLabel(field(lead, 'dataPublicacao', 'publishedAt')))}</span></td>
+            <td><span class="tag">${escapeHtml(classification ? `${classification}º lugar` : 'Não vencedor')}</span><span class="subtle">${escapeHtml(occurrence)}</span></td>
+            <td class="ai-summary">${escapeHtml(summary)}</td>
+            <td><button class="secondary-button" data-copy-index="${index}" type="button">Copiar abordagem</button></td>
+          </tr>`;
+        }).join('');
+
+        body.querySelectorAll('[data-copy-index]').forEach(element => element.addEventListener('click', () => copyApproach(Number(element.dataset.copyIndex))));
+      }
+
+      async function loadLeads() {
+        try {
+          const response = await fetch('/api/leads');
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Falha ao carregar leads.');
+          renderLeads(data.leads || []);
+          document.querySelector('#metricUpdated').textContent = 'Agora';
+        } catch (error) {
+          document.querySelector('#leadsCount').textContent = 'Configure o webhook para carregar salvos';
+          renderLeads([]);
+        }
+      }
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        button.disabled = true;
+        button.textContent = 'Pesquisando…';
+        try {
+          const payload = Object.fromEntries(new FormData(form).entries());
+          const response = await fetch('/api/buscar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Não foi possível concluir a pesquisa.');
+          renderLeads(data.leads || []);
+          document.querySelector('#metricUf').textContent = payload.uf;
+          document.querySelector('#metricUpdated').textContent = 'Agora';
+          showToast(`${data.total || 0} lead${data.total === 1 ? '' : 's'} encontrado${data.total === 1 ? '' : 's'}.`);
+        } catch (error) {
+          showToast(error.message, true);
+        } finally {
+          button.disabled = false;
+          button.textContent = 'Pesquisar Agora';
+        }
+      });
+
+      const today = new Date();
+      const weekAgo = new Date(today);
+      weekAgo.setDate(today.getDate() - 7);
+      document.querySelector('#dataInicial').value = isoDate(weekAgo);
+      document.querySelector('#dataFinal').value = isoDate(today);
+      renderLeads([]);
+      loadLeads();
+    </script>
+  </body>
+</html>
