@@ -26,6 +26,10 @@ const TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID");
 const MAX_LEADS = Math.max(1, Number(process.env.MAX_LEADS || 200));
 const MAX_CONTRATACOES = Math.max(1, Number(process.env.PNCP_MAX_CONTRATACOES || 100));
+const MAX_SEARCH_DAYS = Math.max(31, Number(process.env.MAX_SEARCH_DAYS || 366));
+const PNCP_DATE_WINDOW_DAYS = 31;
+const PNCP_UPDATE_MAX_PAGES = Math.max(1, Number(process.env.PNCP_UPDATE_MAX_PAGES || 10));
+const PNCP_REQUEST_TIMEOUT_MS = Math.max(30000, Number(process.env.PNCP_REQUEST_TIMEOUT_MS || 90000));
 const PNCP_MODALIDADE_PREGAO_ELETRONICO = 6;
 
 app.use(express.json({ limit: "1mb" }));
@@ -79,8 +83,8 @@ function validateSearchInput(body = {}) {
   if (days < 0) {
     throw httpError("dataFinal deve ser igual ou posterior a dataInicial.", 400);
   }
-  if (days > 31) {
-    throw httpError("O período máximo de pesquisa é de 31 dias.", 400);
+  if (days > MAX_SEARCH_DAYS) {
+    throw httpError(`O período máximo de pesquisa é de ${MAX_SEARCH_DAYS} dias.`, 400);
   }
 
   return { escopo, uf, cidade, codigoMunicipioIbge, dataInicial, dataFinal };
@@ -142,6 +146,28 @@ async function request(url, options = {}, timeoutMs = 30000) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isRetryable(error) {
+  return error?.name === "AbortError" || [408, 429, 500, 502, 503, 504].includes(error?.status);
+}
+
+async function requestWithRetry(url, options = {}, timeoutMs = 30000, attempts = 2) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await request(url, options, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryable(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+    }
+  }
+  throw lastError;
+}
+
+async function pncpRequest(url) {
+  return requestWithRetry(url, {}, PNCP_REQUEST_TIMEOUT_MS, 2);
 }
 
 function asList(payload, preferredKeys = []) {
@@ -215,7 +241,7 @@ async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, 
       pagina: page,
       tamanhoPagina: pageSize
     });
-    const { body } = await request(url);
+    const { body } = await pncpRequest(url);
     const rows = asList(body);
     output.push(...rows);
 
@@ -244,14 +270,14 @@ async function fetchResults(identity, item) {
     PNCP_DATA_API_BASE_URL,
     `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/itens/${numeroItem}/resultados`
   );
-  const { body } = await request(url);
+  const { body } = await pncpRequest(url);
   return asList(body, ["listaResultados", "resultados"]);
 }
 
 async function fetchHistory(identity) {
   try {
     const url = makeUrl(PNCP_DATA_API_BASE_URL, `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/historico`);
-    const { body } = await request(url);
+    const { body } = await pncpRequest(url);
     return asList(body, ["historico", "historicos", "logs"]);
   } catch (error) {
     console.warn("Histórico PNCP indisponível:", error.message);
@@ -333,6 +359,27 @@ function buildOccurrence(result, history) {
 
 function contractTitle(contract, item) {
   return String(firstValue(item, ["descricao", "descricaoItem", "objeto"]) || firstValue(contract, ["objetoCompra", "objeto", "descricaoObjeto", "titulo"] ) || "Objeto não informado").trim();
+}
+
+function isoDateFromUtc(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function splitDateRange(dataInicial, dataFinal, windowDays = PNCP_DATE_WINDOW_DAYS) {
+  const ranges = [];
+  const end = new Date(`${dataFinal}T00:00:00.000Z`);
+  let cursor = new Date(`${dataInicial}T00:00:00.000Z`);
+
+  while (cursor <= end) {
+    const windowEnd = new Date(cursor);
+    windowEnd.setUTCDate(windowEnd.getUTCDate() + windowDays - 1);
+    if (windowEnd > end) windowEnd.setTime(end.getTime());
+    ranges.push({ dataInicial: isoDateFromUtc(cursor), dataFinal: isoDateFromUtc(windowEnd) });
+    cursor = new Date(windowEnd);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return ranges;
 }
 
 function contractMatchesScope(contract, filters) {
@@ -449,19 +496,41 @@ async function summarizeWithNvidia(lead) {
 }
 
 async function searchPncp(filters) {
-  const contracts = await fetchPaginated("/v1/contratacoes/atualizacao", {
-    dataInicial: filters.dataInicial.replaceAll("-", ""),
-    dataFinal: filters.dataFinal.replaceAll("-", ""),
-    codigoModalidadeContratacao: PNCP_MODALIDADE_PREGAO_ELETRONICO,
-    ...(filters.uf ? { uf: filters.uf } : {}),
-    ...(filters.escopo === "cidade" && filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {})
-  }, {
-    pageSize: 50,
-    maxPages: 1,
-    maxItems: MAX_CONTRATACOES
-  });
+  const contracts = [];
+  let lastWindowError;
+  const ranges = splitDateRange(filters.dataInicial, filters.dataFinal);
 
-  const eligibleContracts = contracts.filter((contract) => purchaseHasResultOrIsFinished(contract) && contractMatchesScope(contract, filters));
+  for (const range of ranges) {
+    try {
+      const windowContracts = await fetchPaginated("/v1/contratacoes/atualizacao", {
+        dataInicial: range.dataInicial.replaceAll("-", ""),
+        dataFinal: range.dataFinal.replaceAll("-", ""),
+        codigoModalidadeContratacao: PNCP_MODALIDADE_PREGAO_ELETRONICO,
+        ...(filters.uf ? { uf: filters.uf } : {}),
+        ...(filters.escopo === "cidade" && filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {})
+      }, {
+        pageSize: 50,
+        maxPages: PNCP_UPDATE_MAX_PAGES,
+        maxItems: MAX_CONTRATACOES
+      });
+      contracts.push(...windowContracts);
+    } catch (error) {
+      lastWindowError = error;
+      console.warn(`Janela PNCP indisponível (${range.dataInicial} a ${range.dataFinal}):`, error.message);
+    }
+  }
+
+  if (!contracts.length && lastWindowError) throw lastWindowError;
+
+  const uniqueContracts = new Map();
+  for (const contract of contracts) {
+    const key = String(firstValue(contract, ["numeroControlePNCP", "id"]) || JSON.stringify(contract));
+    uniqueContracts.set(key, contract);
+  }
+
+  const eligibleContracts = [...uniqueContracts.values()]
+    .filter((contract) => purchaseHasResultOrIsFinished(contract) && contractMatchesScope(contract, filters))
+    .slice(0, MAX_CONTRATACOES);
 
   const contractResults = await mapWithConcurrency(eligibleContracts, 3, async (contract) => {
     const identity = getContractIdentity(contract);
@@ -514,9 +583,14 @@ async function sendToGoogleSheets(filters, leads) {
 }
 
 function telegramText(filters, leads) {
+  const localidade = filters.escopo === "federal"
+    ? "Federal"
+    : filters.escopo === "cidade"
+      ? `${filters.cidade || filters.codigoMunicipioIbge} / ${filters.uf}`
+      : filters.uf;
   const lines = [
     "PECUS Consultoria em Licitações",
-    `Pesquisa: ${filters.uf} | ${filters.dataInicial} a ${filters.dataFinal}`,
+    `Pesquisa: ${localidade} | ${filters.dataInicial} a ${filters.dataFinal}`,
     `Leads encontrados: ${leads.length}`
   ];
 
