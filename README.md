@@ -14,7 +14,7 @@ Abra `http://localhost:3000`.
 
 ## Variáveis de ambiente
 
-- `PNCP_API_BASE_URL` (ou `PNCP_API_URL`): base da API de consulta do PNCP. O padrão é `https://pncp.gov.br/api/consulta`. A busca usa `GET /v1/contratacoes/atualizacao`, `codigoModalidadeContratacao=6` (Pregão Eletrônico), UF e `pagina=1`.
+- `PNCP_API_BASE_URL` (ou `PNCP_API_URL`): base da API de consulta do PNCP. O padrão é `https://pncp.gov.br/api/consulta`. A busca usa `GET /v1/contratacoes/atualizacao`, `codigoModalidadeContratacao=6` (Pregão Eletrônico) e `pagina=1`.
 - `PNCP_DATA_API_BASE_URL` (ou `PNCP_API_DATA_BASE_URL`): base para itens, resultados e histórico. O padrão é derivado como `https://pncp.gov.br/api/pncp/v1`.
 - `NVIDIA_API_KEY`: chave NVIDIA para resumir cada ocorrência em uma frase. `NVIDIA_API_URL` (ou `NVIDIA_API_BASE_URL`) e `NVIDIA_MODEL` são opcionais.
 - `GOOGLE_SHEETS_WEBHOOK_URL` (ou `GOOGLE_SHEETS_URL`): endpoint que recebe `POST` com `{ action, filtros, leads }` e responde a `GET` com os leads salvos. Sem a variável, a aplicação continua funcionando apenas em memória.
@@ -23,6 +23,10 @@ Abra `http://localhost:3000`.
 - `MAX_LEADS` e `PNCP_MAX_CONTRATACOES`: limites operacionais opcionais.
 
 O webhook da planilha deve aceitar o lote enviado pela aplicação. Cada lead contém fornecedor, identificação, objeto, classificação, ocorrência, resumo da IA, órgão, data e link do PNCP. A implementação do webhook pode fazer `upsert` usando o campo `id`.
+
+## Escopos da pesquisa
+
+`POST /api/buscar` aceita `escopo` como `estado`, `cidade` ou `federal`. O escopo estadual usa `uf`; o municipal usa `uf` com `cidade` e/ou `codigoMunicipioIbge`; o federal consulta sem UF e filtra órgãos cuja esfera seja federal.
 
 ## Deploy no Render
 
