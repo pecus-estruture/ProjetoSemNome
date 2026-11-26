@@ -64,13 +64,17 @@
       .filters-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
       .filters-head h3, .leads-head h3 { margin: 0; font-size: 1rem; }
       .filters-head span { color: var(--muted); font-size: .82rem; }
-      .filter-grid { display: grid; grid-template-columns: 1fr .85fr 1.25fr .95fr .95fr auto; gap: 13px; align-items: end; }
+      .filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; align-items: end; }
+      .filter-grid .wide { grid-column: span 2; }
+      .filter-section-title { grid-column: 1 / -1; margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line-strong); color: var(--gold-soft); font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; }
+      .filter-hint { grid-column: 1 / -1; margin: -4px 0 2px; color: var(--muted); font-size: .78rem; }
       .hidden { display: none !important; }
       label { display: grid; gap: 8px; color: #e0e8f1; font-size: .76rem; font-weight: 700; letter-spacing: .02em; }
       input, select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 12px; outline: none; color: var(--ink); background: var(--field); font: inherit; color-scheme: dark; transition: border-color .2s, box-shadow .2s; }
       input::placeholder { color: #b5c3d2; }
       input:focus, select:focus { border-color: var(--gold-soft); box-shadow: 0 0 0 4px rgba(246,223,134,.18); }
       input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid rgba(246,223,134,.78); outline-offset: 2px; }
+      input:disabled, select:disabled { cursor: not-allowed; opacity: .6; }
       select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--gold) 50%), linear-gradient(135deg, var(--gold) 50%, transparent 50%); background-position: calc(100% - 17px) 20px, calc(100% - 12px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
       option { color: #10243e; }
       .primary-button, .secondary-button { min-height: 46px; border: 0; border-radius: 12px; padding: 0 18px; cursor: pointer; font: inherit; font-weight: 800; transition: transform .2s, box-shadow .2s, opacity .2s; }
@@ -153,24 +157,84 @@
                 <option value="federal">Federal</option>
               </select>
             </label>
-            <label id="ufField">Estado (UF)
+            <label id="ufField">UFs
               <select id="uf" name="uf">
                 <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option selected>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
               </select>
             </label>
-            <label id="cityField" class="hidden">Cidade
-              <input id="cidade" name="cidade" type="text" placeholder="Ex.: Goiânia" />
+            <label id="cityField" class="hidden">Municípios
+              <select id="cidade" name="cidade" disabled><option value="">Selecione a UF primeiro</option></select>
             </label>
-            <label id="ibgeField" class="hidden">Código IBGE (opcional)
-              <input id="codigoMunicipioIbge" name="codigoMunicipioIbge" type="text" inputmode="numeric" maxlength="7" placeholder="7 dígitos" />
-            </label>
+            <input id="codigoMunicipioIbge" name="codigoMunicipioIbge" type="hidden" />
             <label>Data inicial
               <input id="dataInicial" name="dataInicial" type="date" required />
             </label>
             <label>Data final
               <input id="dataFinal" name="dataFinal" type="date" required />
             </label>
+            <label>Status
+              <select id="status" name="status">
+                <option value="todos" selected>Todos</option>
+                <option value="a_receber">A Receber/Recebendo Proposta</option>
+                <option value="julgamento">Em Julgamento/Propostas Encerradas</option>
+                <option value="encerradas">Encerradas</option>
+              </select>
+            </label>
+            <label class="wide">Palavra-chave
+              <input id="palavraChave" name="palavraChave" type="search" placeholder="Objeto, contratação ou termo de interesse" />
+            </label>
             <button class="primary-button" type="submit" id="searchButton">Pesquisar Agora</button>
+
+            <div class="filter-section-title">Filtros</div>
+            <div class="filter-hint">Os campos abaixo refinam os dados retornados pelo PNCP; a lista de municípios é carregada conforme a UF escolhida.</div>
+            <label>Tipos de Instrumento Convocatório
+              <select name="tipoInstrumentoConvocatorio"><option value="">Selecione</option><option value="edital">Edital</option><option value="aviso">Aviso</option><option value="chamamento">Chamamento</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Ano da Contratação
+              <select name="anoContratacao"><option value="">Selecione</option><option>2026</option><option>2025</option><option>2024</option><option>2023</option><option>2022</option><option>2021</option><option>2020</option></select>
+            </label>
+            <label>Modalidades da Contratação
+              <select name="modalidade"><option value="6" selected>Pregão Eletrônico</option><option value="1">Concorrência</option><option value="2">Dispensa</option><option value="3">Inexigibilidade</option><option value="4">Concurso</option><option value="5">Leilão</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Órgãos
+              <input name="orgao" type="search" placeholder="Nome ou CNPJ" />
+            </label>
+            <label>Unidades
+              <input name="unidade" type="search" placeholder="Nome ou código" />
+            </label>
+            <label>Esferas
+              <select name="esfera"><option value="">Selecione</option><option value="federal">Federal</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option><option value="distrital">Distrital</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Poderes
+              <select name="poder"><option value="">Selecione</option><option value="executivo">Executivo</option><option value="legislativo">Legislativo</option><option value="judiciario">Judiciário</option><option value="ministerio publico">Ministério Público</option><option value="defensoria">Defensoria</option><option value="tribunal de contas">Tribunal de Contas</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Fontes/Plataformas
+              <select name="fonte"><option value="">Selecione</option><option value="pncp">PNCP</option><option value="compras.gov.br">Compras.gov.br</option><option value="bec">BEC</option><option value="licitacoes-e">Licitações-e</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Emenda Parlamentar
+              <select name="emendaParlamentar"><option value="">Selecione</option><option value="sim">Sim</option><option value="nao">Não</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Normativos Base
+              <select name="normativoBase"><option value="">Selecione</option><option value="lei 14.133">Lei 14.133/2021</option><option value="lei 8.666">Lei 8.666/1993</option><option value="lei 10.520">Lei 10.520/2002</option><option value="rdc">RDC</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Amparos Legais
+              <select name="amparoLegal"><option value="">Selecione</option><option value="lei 14.133">Lei 14.133/2021</option><option value="decreto 10.024">Decreto 10.024/2019</option><option value="lei complementar 123">Lei Complementar 123/2006</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Modos de Disputa
+              <select name="modoDisputa"><option value="">Selecione</option><option value="1">Aberto</option><option value="2">Aberto e fechado</option><option value="3">Fechado</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Critério de Julgamento
+              <select name="criterioJulgamento"><option value="">Selecione</option><option value="menor preco">Menor preço</option><option value="maior desconto">Maior desconto</option><option value="tecnica e preco">Técnica e preço</option><option value="melhor tecnica">Melhor técnica</option><option value="maior lance">Maior lance</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Fornecedores/Arrematantes
+              <input name="fornecedor" type="search" placeholder="Nome ou CNPJ" />
+            </label>
+            <label>Item Sigiloso
+              <select name="itemSigiloso"><option value="">Selecione</option><option value="sim">Sim</option><option value="nao">Não</option><option value="todos">Todos</option></select>
+            </label>
+            <label>Nota Fiscal Eletrônica
+              <select name="notaFiscalEletronica"><option value="">Selecione</option><option value="sim">Sim</option><option value="nao">Não</option><option value="todos">Todos</option></select>
+            </label>
           </form>
         </section>
 
@@ -208,8 +272,9 @@
       const scopeSelect = document.querySelector('#escopo');
       const ufField = document.querySelector('#ufField');
       const cityField = document.querySelector('#cityField');
-      const ibgeField = document.querySelector('#ibgeField');
       const ufInput = document.querySelector('#uf');
+      const cityInput = document.querySelector('#cidade');
+      const ibgeInput = document.querySelector('#codigoMunicipioIbge');
       let toastTimer;
       let leads = [];
 
@@ -229,8 +294,27 @@
         const isFederal = scope === 'federal';
         ufField.classList.toggle('hidden', isFederal);
         cityField.classList.toggle('hidden', !isCity);
-        ibgeField.classList.toggle('hidden', !isCity);
         ufInput.disabled = isFederal;
+        cityInput.disabled = !isCity;
+        if (isCity) loadMunicipios(ufInput.value);
+      }
+
+      async function loadMunicipios(uf) {
+        if (!uf) return;
+        cityInput.disabled = true;
+        cityInput.innerHTML = '<option value="">Carregando municípios…</option>';
+        try {
+          const response = await fetch(`/api/municipios?uf=${encodeURIComponent(uf)}`);
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.error || 'Não foi possível carregar os municípios.');
+          cityInput.innerHTML = '<option value="">Selecione</option>' + (data.municipios || []).map(municipio => `<option value="${escapeHtml(municipio.nome)}" data-codigo="${escapeHtml(municipio.codigo)}">${escapeHtml(municipio.nome)}</option>`).join('');
+          cityInput.disabled = scopeSelect.value !== 'cidade';
+        } catch (error) {
+          cityInput.innerHTML = '<option value="">Municípios indisponíveis</option>';
+          cityInput.disabled = true;
+          showToast(error.message, true);
+        }
+        ibgeInput.value = '';
       }
 
       function showToast(message, isError = false) {
@@ -326,9 +410,15 @@
       document.querySelector('#dataInicial').value = isoDate(weekAgo);
       document.querySelector('#dataFinal').value = isoDate(today);
       scopeSelect.addEventListener('change', updateScopeFields);
+      ufInput.addEventListener('change', () => { if (scopeSelect.value === 'cidade') loadMunicipios(ufInput.value); });
+      cityInput.addEventListener('change', () => { ibgeInput.value = cityInput.selectedOptions[0]?.dataset.codigo || ''; });
       updateScopeFields();
       renderLeads([]);
       loadLeads();
     </script>
   </body>
 </html>
+
+
+
+
