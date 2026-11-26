@@ -51,9 +51,23 @@ function validateDate(value, fieldName) {
 }
 
 function validateSearchInput(body = {}) {
-  const uf = String(body.uf || "GO").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(uf)) {
+  const escopo = String(body.escopo || "estado").trim().toLowerCase();
+  if (!["cidade", "estado", "federal"].includes(escopo)) {
+    throw httpError("escopo deve ser cidade, estado ou federal.", 400);
+  }
+
+  const uf = escopo === "federal" ? "" : String(body.uf || "GO").trim().toUpperCase();
+  if (escopo !== "federal" && !/^[A-Z]{2}$/.test(uf)) {
     throw httpError("UF deve conter exatamente duas letras.", 400);
+  }
+
+  const cidade = String(body.cidade || "").trim();
+  const codigoMunicipioIbge = cleanDigits(body.codigoMunicipioIbge);
+  if (escopo === "cidade" && !cidade && !codigoMunicipioIbge) {
+    throw httpError("Informe a cidade ou o código IBGE para pesquisar por cidade.", 400);
+  }
+  if (codigoMunicipioIbge && codigoMunicipioIbge.length !== 7) {
+    throw httpError("O código IBGE deve conter 7 dígitos.", 400);
   }
 
   const dataInicial = validateDate(body.dataInicial, "dataInicial");
@@ -69,7 +83,7 @@ function validateSearchInput(body = {}) {
     throw httpError("O período máximo de pesquisa é de 31 dias.", 400);
   }
 
-  return { uf, dataInicial, dataFinal };
+  return { escopo, uf, cidade, codigoMunicipioIbge, dataInicial, dataFinal };
 }
 
 function makeUrl(base, pathname, params = {}) {
@@ -152,6 +166,14 @@ function firstValue(object, keys) {
     if (value !== undefined && value !== null && String(value).trim() !== "") return value;
   }
   return "";
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
 }
 
 function cleanDigits(value) {
@@ -313,6 +335,26 @@ function contractTitle(contract, item) {
   return String(firstValue(item, ["descricao", "descricaoItem", "objeto"]) || firstValue(contract, ["objetoCompra", "objeto", "descricaoObjeto", "titulo"] ) || "Objeto não informado").trim();
 }
 
+function contractMatchesScope(contract, filters) {
+  const unidade = contract?.unidadeOrgao || {};
+  const orgao = contract?.orgaoEntidade || {};
+  const contractUf = String(firstValue(unidade, ["ufSigla", "uf"]) || firstValue(contract, ["uf", "unidadeFederativa"]) || "").toUpperCase();
+
+  if (filters.escopo === "estado") return contractUf === filters.uf;
+
+  if (filters.escopo === "cidade") {
+    const contractIbge = cleanDigits(firstValue(unidade, ["codigoIbge", "codigoMunicipioIbge"]));
+    const requestedCity = normalizeText(filters.cidade);
+    const contractCity = normalizeText(firstValue(unidade, ["municipioNome", "municipio", "nomeMunicipio"]));
+    const matchesIbge = filters.codigoMunicipioIbge && contractIbge === filters.codigoMunicipioIbge;
+    const matchesName = requestedCity && contractCity && (contractCity === requestedCity || contractCity.includes(requestedCity));
+    return contractUf === filters.uf && (matchesIbge || matchesName);
+  }
+
+  const esfera = normalizeText(firstValue(orgao, ["esferaId", "esferaNome", "esfera"]));
+  return /^f$|^1$|federal/.test(esfera);
+}
+
 function toLead(contract, identity, item, result, history) {
   const supplierName = String(firstValue(result, ["nomeRazaoSocialFornecedor", "razaoSocialFornecedor", "nomeFornecedor"]) || "Fornecedor não informado").trim();
   const supplierId = String(firstValue(result, ["niFornecedor", "cnpjFornecedor", "cpfFornecedor"]) || "").trim();
@@ -333,8 +375,10 @@ function toLead(contract, identity, item, result, history) {
     numeroItem,
     numeroControlePNCP: procurementId,
     orgao: String(firstValue(contract?.orgaoEntidade || contract?.orgao || {}, ["razaoSocial", "nome", "nomeOrgao"]) || "Órgão público não informado"),
-    uf: String(firstValue(contract, ["uf", "unidadeFederativa"]) || contract?.unidadeOrgao?.uf || "").toUpperCase(),
-    dataPublicacao: firstValue(contract, ["dataPublicacaoPncp", "dataPublicacao", "dataInclusao"]),
+    uf: String(firstValue(contract?.unidadeOrgao || {}, ["ufSigla", "uf"]) || firstValue(contract, ["uf", "unidadeFederativa"]) || "").toUpperCase(),
+    cidade: String(firstValue(contract?.unidadeOrgao || {}, ["municipioNome", "municipio", "nomeMunicipio"]) || ""),
+    esfera: String(firstValue(contract?.orgaoEntidade || {}, ["esferaNome", "esferaId", "esfera"]) || ""),
+    dataPublicacao: firstValue(contract, ["dataPublicacaoPncp", "dataAtualizacaoGlobal", "dataPublicacao", "dataInclusao"]),
     linkPNCP: firstValue(contract, ["urlSistemaOrigem", "linkSistemaOrigem", "urlPncp", "linkPncp"]) || `https://pncp.gov.br/app/editais/${encodeURIComponent(procurementId)}`
   };
 }
@@ -409,14 +453,15 @@ async function searchPncp(filters) {
     dataInicial: filters.dataInicial.replaceAll("-", ""),
     dataFinal: filters.dataFinal.replaceAll("-", ""),
     codigoModalidadeContratacao: PNCP_MODALIDADE_PREGAO_ELETRONICO,
-    uf: filters.uf
+    ...(filters.uf ? { uf: filters.uf } : {}),
+    ...(filters.escopo === "cidade" && filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {})
   }, {
     pageSize: 50,
     maxPages: 1,
     maxItems: MAX_CONTRATACOES
   });
 
-  const eligibleContracts = contracts.filter(purchaseHasResultOrIsFinished);
+  const eligibleContracts = contracts.filter((contract) => purchaseHasResultOrIsFinished(contract) && contractMatchesScope(contract, filters));
 
   const contractResults = await mapWithConcurrency(eligibleContracts, 3, async (contract) => {
     const identity = getContractIdentity(contract);
