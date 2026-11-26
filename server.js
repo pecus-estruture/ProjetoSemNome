@@ -25,11 +25,13 @@ const TELEGRAM_API_BASE_URL = (env("TELEGRAM_API_BASE_URL", "TELEGRAM_API_URL") 
 const TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID");
 const MAX_LEADS = Math.max(1, Number(process.env.MAX_LEADS || 200));
-const MAX_CONTRATACOES = Math.max(1, Number(process.env.PNCP_MAX_CONTRATACOES || 100));
+const MAX_CONTRATACOES = Math.max(1, Number(process.env.PNCP_MAX_CONTRATACOES || 300));
 const MAX_SEARCH_DAYS = Math.max(31, Number(process.env.MAX_SEARCH_DAYS || 366));
 const PNCP_DATE_WINDOW_DAYS = 31;
-const PNCP_UPDATE_MAX_PAGES = Math.max(1, Number(process.env.PNCP_UPDATE_MAX_PAGES || 10));
+const PNCP_UPDATE_MAX_PAGES = Math.max(1, Number(process.env.PNCP_UPDATE_MAX_PAGES || 20));
 const PNCP_REQUEST_TIMEOUT_MS = Math.max(30000, Number(process.env.PNCP_REQUEST_TIMEOUT_MS || 90000));
+const PNCP_PUBLICATION_FALLBACK = env("PNCP_PUBLICATION_FALLBACK") !== "false";
+const PNCP_UPDATE_FALLBACK_TIMEOUT_MS = Math.max(10000, Number(process.env.PNCP_UPDATE_FALLBACK_TIMEOUT_MS || 25000));
 const PNCP_MODALIDADE_PREGAO_ELETRONICO = 6;
 const IBGE_API_BASE_URL = (env("IBGE_API_BASE_URL") || "https://servicodados.ibge.gov.br/api/v1/localidades/estados").replace(/\/+$/, "");
 const municipalityCache = new Map();
@@ -202,6 +204,19 @@ async function pncpRequest(url) {
   return requestWithRetry(url, {}, PNCP_REQUEST_TIMEOUT_MS, 2);
 }
 
+async function settleWithin(promise, timeoutMs) {
+  let timer;
+  const wrapped = promise
+    .then((value) => ({ status: "fulfilled", value }))
+    .catch((reason) => ({ status: "rejected", reason }));
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ status: "timedout" }), timeoutMs);
+  });
+  const result = await Promise.race([wrapped, timeout]);
+  clearTimeout(timer);
+  return result;
+}
+
 function asList(payload, preferredKeys = []) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -246,12 +261,93 @@ function matchesTextFilter(value, filter) {
   return !hasFilterValue(filter) || normalizeText(value).includes(normalizeText(filter));
 }
 
-function contractStatusMatches(contract, status) {
+function booleanValue(value) {
+  if (typeof value === "boolean") return value;
+  const normalized = normalizeText(value);
+  if (["true", "1", "sim", "yes"].includes(normalized)) return true;
+  if (["false", "0", "nao", "não", "no"].includes(normalized)) return false;
+  return null;
+}
+
+function sphereCode(value) {
+  const normalized = normalizeText(value);
+  if (/^(f|federal)$/.test(normalized)) return "F";
+  if (/^(e|estadual)$/.test(normalized)) return "E";
+  if (/^(m|municipal)$/.test(normalized)) return "M";
+  if (/^(d|distrital)$/.test(normalized)) return "D";
+  return "";
+}
+
+function powerCode(value) {
+  const normalized = normalizeText(value);
+  if (/^(e|executivo)$/.test(normalized)) return "E";
+  if (/^(l|legislativo)$/.test(normalized)) return "L";
+  if (/^(j|judiciario|judiciário)$/.test(normalized)) return "J";
+  return "";
+}
+
+function officialSphere(contract) {
+  const orgao = contract?.orgaoEntidade || contract?.orgao || {};
+  return sphereCode(firstValue(orgao, ["esferaId", "esferaNome", "esfera"]));
+}
+
+function officialPower(contract) {
+  const orgao = contract?.orgaoEntidade || contract?.orgao || {};
+  return powerCode(firstValue(orgao, ["poderId", "poderNome", "poder"]));
+}
+
+function officialUf(contract) {
+  const unidade = contract?.unidadeOrgao || {};
+  return String(firstValue(unidade, ["ufSigla", "uf"]) || firstValue(contract, ["uf", "unidadeFederativa"]) || "").trim().toUpperCase();
+}
+
+function officialMunicipalityCode(contract) {
+  const unidade = contract?.unidadeOrgao || {};
+  return cleanDigits(firstValue(unidade, ["codigoIbge", "municipioId", "codigoMunicipioIbge"]));
+}
+
+function officialMunicipalityName(contract) {
+  const unidade = contract?.unidadeOrgao || {};
+  return String(firstValue(unidade, ["municipioNome", "municipio", "nomeMunicipio"]) || "").trim();
+}
+
+function contractStatusCategory(contract) {
+  const statusName = normalizeText(firstValue(contract, ["situacaoCompraNome", "situacaoNome"]));
+  const hasResult = booleanValue(firstValue(contract, ["existeResultado", "temResultado", "temResultados", "possuiResultado"]));
+  const homologatedValue = Number(firstValue(contract, ["valorTotalHomologado", "valorHomologado"]));
+  if (hasResult === true || homologatedValue > 0 || /homologad|adjudicad|finalizad|concluid|encerrad/.test(statusName)) {
+    return "encerradas";
+  }
+
+  const statusId = Number(firstValue(contract, ["situacaoCompraId", "situacaoId"]));
+  if ([2, 3, 4].includes(statusId) || /revogad|anulad|suspend/.test(statusName)) return "encerradas";
+
+  const opening = Date.parse(String(firstValue(contract, ["dataAberturaProposta"]) || ""));
+  const closing = Date.parse(String(firstValue(contract, ["dataEncerramentoProposta"]) || ""));
+  const now = Date.now();
+  if (Number.isFinite(opening) && Number.isFinite(closing) && opening <= now && closing > now) return "a_receber";
+  if (Number.isFinite(closing) && closing <= now) return "julgamento";
+
+  if (/recebendo proposta|recebimento de proposta|aberta/.test(statusName)) return "a_receber";
+  if (/em julgamento|propostas encerradas|julgament/.test(statusName)) return "julgamento";
+  return "";
+}
+
+function contractStatusMatchesWithItems(contract, status, items, itemResults) {
   if (!hasFilterValue(status)) return true;
-  const text = normalizeText(JSON.stringify(contract));
-  if (status === "a_receber") return /a receber|recebendo proposta|recebimento de proposta|abert/.test(text);
-  if (status === "julgamento") return /em julgamento|propostas encerradas|julgament|propostas fechad/.test(text);
-  if (status === "encerradas") return /encerrad|homologad|finalizad|adjudicad|concluid/.test(text);
+  const category = contractStatusCategory(contract);
+  const hasItemResult = itemResults.some(({ results }) => results.length > 0)
+    || items.some((item) => booleanValue(item?.temResultado) === true);
+
+  if (status === "encerradas") {
+    return hasItemResult || category === "encerradas" || !category;
+  }
+  if (status === "a_receber") {
+    return !hasItemResult && category !== "encerradas" && category !== "julgamento";
+  }
+  if (status === "julgamento") {
+    return !hasItemResult && category !== "encerradas" && category !== "a_receber";
+  }
   return true;
 }
 
@@ -431,59 +527,116 @@ function splitDateRange(dataInicial, dataFinal, windowDays = PNCP_DATE_WINDOW_DA
   return ranges;
 }
 
-function contractMatchesScope(contract, filters) {
-  const unidade = contract?.unidadeOrgao || {};
-  const orgao = contract?.orgaoEntidade || {};
-  const contractUf = String(firstValue(unidade, ["ufSigla", "uf"]) || firstValue(contract, ["uf", "unidadeFederativa"]) || "").toUpperCase();
+function pncpSearchParams(filters, range) {
+  return {
+    dataInicial: range.dataInicial.replaceAll("-", ""),
+    dataFinal: range.dataFinal.replaceAll("-", ""),
+    codigoModalidadeContratacao: filters.modalidade === "todos" ? PNCP_MODALIDADE_PREGAO_ELETRONICO : filters.modalidade,
+    ...(hasFilterValue(filters.modoDisputa) ? { codigoModoDisputa: filters.modoDisputa } : {}),
+    ...(filters.uf ? { uf: filters.uf } : {}),
+    ...(filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {}),
+    ...(hasFilterValue(filters.orgao) && /^\d{14}$/.test(cleanDigits(filters.orgao)) ? { cnpj: cleanDigits(filters.orgao) } : {}),
+    ...(hasFilterValue(filters.unidade) && !/\s/.test(filters.unidade) ? { codigoUnidadeAdministrativa: filters.unidade } : {})
+  };
+}
 
-  if (filters.escopo === "estado") return contractUf === filters.uf;
+async function fetchContractsForWindow(filters, range) {
+  const params = pncpSearchParams(filters, range);
+  const publicationParams = { ...params };
+  delete publicationParams.codigoModoDisputa;
+
+  const updatePromise = fetchPaginated("/v1/contratacoes/atualizacao", params, {
+    pageSize: 50,
+    maxPages: PNCP_UPDATE_MAX_PAGES,
+    maxItems: MAX_CONTRATACOES
+  });
+  const publicationPromise = PNCP_PUBLICATION_FALLBACK
+    ? fetchPaginated("/v1/contratacoes/publicacao", publicationParams, {
+      pageSize: 50,
+      maxPages: PNCP_UPDATE_MAX_PAGES,
+      maxItems: MAX_CONTRATACOES
+    })
+    : Promise.resolve([]);
+
+  const updateResult = await settleWithin(updatePromise, PNCP_UPDATE_FALLBACK_TIMEOUT_MS);
+  const publicationResult = await settleWithin(publicationPromise, PNCP_REQUEST_TIMEOUT_MS);
+  const contracts = [];
+  const errors = [];
+
+  if (updateResult.status === "fulfilled") {
+    contracts.push(...updateResult.value);
+  } else {
+    errors.push(updateResult.status === "timedout" ? httpError("A consulta de atualização do PNCP excedeu o tempo de fallback.", 504) : updateResult.reason);
+  }
+
+  if (publicationResult.status === "fulfilled") {
+    contracts.push(...publicationResult.value);
+  } else {
+    errors.push(publicationResult.status === "timedout" ? httpError("A consulta de publicação do PNCP excedeu o tempo limite.", 504) : publicationResult.reason);
+  }
+
+  return { contracts, errors };
+}
+
+function contractMatchesScope(contract, filters) {
+  const contractUf = officialUf(contract);
+
+  if (filters.escopo === "estado") return contractUf === filters.uf && officialSphere(contract) === "E";
 
   if (filters.escopo === "cidade") {
-    const contractIbge = cleanDigits(firstValue(unidade, ["codigoIbge", "codigoMunicipioIbge"]));
+    const contractIbge = officialMunicipalityCode(contract);
     const requestedCity = normalizeText(filters.cidade);
-    const contractCity = normalizeText(firstValue(unidade, ["municipioNome", "municipio", "nomeMunicipio"]));
+    const contractCity = normalizeText(officialMunicipalityName(contract));
     const matchesIbge = filters.codigoMunicipioIbge && contractIbge === filters.codigoMunicipioIbge;
     const matchesName = requestedCity && contractCity && (contractCity === requestedCity || contractCity.includes(requestedCity));
     return contractUf === filters.uf && (matchesIbge || matchesName);
   }
 
-  const esfera = normalizeText(firstValue(orgao, ["esferaId", "esferaNome", "esfera"]));
-  return /^f$|^1$|federal/.test(esfera);
+  return officialSphere(contract) === "F";
 }
 
 function contractMatchesFilters(contract, filters) {
-  if (!contractMatchesScope(contract, filters) || !contractStatusMatches(contract, filters.status)) return false;
+  if (!contractMatchesScope(contract, filters)) return false;
 
   const unidade = contract?.unidadeOrgao || {};
   const orgao = contract?.orgaoEntidade || {};
   const contractText = normalizeText(JSON.stringify(contract));
-  const modalidade = `${firstValue(contract, ["modalidadeId", "codigoModalidadeContratacao"]) || ""} ${firstValue(contract, ["modalidadeNome"]) || ""}`;
+  const modalidadeId = String(firstValue(contract, ["modalidadeId", "codigoModalidadeContratacao"]) || "");
+  const modalidade = `${modalidadeId} ${firstValue(contract, ["modalidadeNome"]) || ""}`;
   const instrumento = `${firstValue(contract, ["tipoInstrumentoConvocatorioCodigo"]) || ""} ${firstValue(contract, ["tipoInstrumentoConvocatorioNome"]) || ""}`;
   const year = String(firstValue(contract, ["anoCompra", "anoContratacao", "ano"]) || "");
-  const municipio = `${firstValue(unidade, ["municipioNome", "municipio", "nomeMunicipio"]) || ""} ${firstValue(unidade, ["codigoIbge", "codigoMunicipioIbge"]) || ""}`;
-  const esfera = `${firstValue(orgao, ["esferaId", "esferaNome", "esfera"]) || ""}`;
-  const poder = `${firstValue(orgao, ["poderId", "poderNome", "poder"]) || ""}`;
-  const fonte = `${firstValue(contract, ["fonteSistema", "sistemaOrigem", "urlSistemaOrigem", "fontesOrcamentarias"]) || ""}`;
-  const emenda = Boolean(firstValue(contract, ["emendaParlamentar", "possuiEmendaParlamentar"]));
-  const itemSigiloso = Boolean(firstValue(contract, ["itemSigiloso", "possuiItemSigiloso"]));
-  const notaFiscal = Boolean(firstValue(contract, ["notaFiscalEletronica", "possuiNotaFiscalEletronica"]));
+  const municipio = `${officialMunicipalityName(contract)} ${officialMunicipalityCode(contract)}`;
+  const esfera = `${officialSphere(contract)} ${firstValue(orgao, ["esferaNome", "esfera"]) || ""}`;
+  const poder = `${officialPower(contract)} ${firstValue(orgao, ["poderNome", "poder"]) || ""}`;
+  const fonte = JSON.stringify(firstValue(contract, ["fontesOrcamentarias", "fonteSistema", "sistemaOrigem", "urlSistemaOrigem"]) || "");
+  const emenda = booleanValue(firstValue(contract, ["emendaParlamentar", "possuiEmendaParlamentar"]));
 
   if (hasFilterValue(filters.palavraChave) && !contractText.includes(normalizeText(filters.palavraChave))) return false;
   if (hasFilterValue(filters.anoContratacao) && year !== filters.anoContratacao) return false;
   if (!matchesTextFilter(instrumento, filters.tipoInstrumentoConvocatorio)) return false;
-  if (!matchesTextFilter(modalidade, filters.modalidade === "todos" ? "" : filters.modalidade)) return false;
+  if (hasFilterValue(filters.modalidade) && filters.modalidade !== "todos" && modalidadeId !== filters.modalidade && !matchesTextFilter(modalidade, filters.modalidade)) return false;
   if (!matchesTextFilter(`${firstValue(orgao, ["razaoSocial", "nome", "nomeOrgao"]) || ""} ${firstValue(orgao, ["cnpj"]) || ""}`, filters.orgao)) return false;
-  if (!matchesTextFilter(`${firstValue(unidade, ["nome", "nomeUnidade", "codigoUnidadeAdministrativa"]) || ""} ${firstValue(unidade, ["codigoUnidadeAdministrativa"]) || ""}`, filters.unidade)) return false;
+  if (!matchesTextFilter(`${firstValue(unidade, ["nome", "nomeUnidade", "codigoUnidade", "codigoUnidadeAdministrativa"]) || ""}`, filters.unidade)) return false;
   if (!matchesTextFilter(municipio, filters.cidade || filters.codigoMunicipioIbge)) return false;
-  if (!matchesTextFilter(esfera, filters.esfera)) return false;
-  if (!matchesTextFilter(poder, filters.poder)) return false;
+  if (hasFilterValue(filters.esfera) && sphereCode(filters.esfera) !== officialSphere(contract)) return false;
+  if (hasFilterValue(filters.poder) && powerCode(filters.poder) !== officialPower(contract)) return false;
   if (!matchesTextFilter(fonte, filters.fonte)) return false;
-  if (hasFilterValue(filters.emendaParlamentar) && ((filters.emendaParlamentar === "sim") !== emenda)) return false;
+  if (hasFilterValue(filters.emendaParlamentar) && booleanValue(filters.emendaParlamentar) !== emenda) return false;
   if (!matchesTextFilter(contractText, filters.normativoBase)) return false;
   if (!matchesTextFilter(contractText, filters.amparoLegal)) return false;
-  if (!matchesTextFilter(contractText, filters.criterioJulgamento)) return false;
-  if (hasFilterValue(filters.itemSigiloso) && ((filters.itemSigiloso === "sim") !== itemSigiloso)) return false;
-  if (hasFilterValue(filters.notaFiscalEletronica) && ((filters.notaFiscalEletronica === "sim") !== notaFiscal)) return false;
+  if (hasFilterValue(filters.modoDisputa) && String(firstValue(contract, ["modoDisputaId", "codigoModoDisputa"]) || "") !== filters.modoDisputa && !matchesTextFilter(String(firstValue(contract, ["modoDisputaNome"]) || ""), filters.modoDisputa)) return false;
+  return true;
+}
+
+function itemMatchesFilters(item, contract, filters) {
+  const itemText = normalizeText(JSON.stringify(item));
+  if (hasFilterValue(filters.criterioJulgamento) && !itemText.includes(normalizeText(filters.criterioJulgamento))) return false;
+
+  const itemSigiloso = booleanValue(firstValue(item, ["orcamentoSigiloso", "itemSigiloso", "possuiItemSigiloso"]));
+  if (hasFilterValue(filters.itemSigiloso) && itemSigiloso !== booleanValue(filters.itemSigiloso)) return false;
+
+  const notaFiscal = booleanValue(firstValue(item, ["notaFiscalEletronica", "possuiNotaFiscalEletronica"]) || firstValue(contract, ["notaFiscalEletronica", "possuiNotaFiscalEletronica"]));
+  if (hasFilterValue(filters.notaFiscalEletronica) && notaFiscal !== booleanValue(filters.notaFiscalEletronica)) return false;
   return true;
 }
 
@@ -526,18 +679,13 @@ function fallbackSummary(lead) {
 }
 
 function purchaseHasResultOrIsFinished(contract) {
-  const status = String(firstValue(contract, [
-    "situacaoCompraNome",
-    "situacaoNome",
-    "status",
-    "faseCompra",
-    "situacao"
-  ]) || "").toLocaleLowerCase("pt-BR");
-  const statusId = Number(firstValue(contract, ["situacaoCompraId", "situacaoId"]));
+  const hasResultFlag = booleanValue(firstValue(contract, ["existeResultado", "temResultado", "temResultados", "possuiResultado"]));
   const homologatedValue = Number(firstValue(contract, ["valorTotalHomologado", "valorHomologado"]));
-  const hasResultFlag = Boolean(firstValue(contract, ["temResultado", "temResultados", "possuiResultado"]));
 
-  return hasResultFlag || homologatedValue > 0 || statusId === 2 || /encerrad|homologad|finalizad|adjudicad|concluíd|concluid/.test(status);
+  // A listagem de atualização nem sempre traz existeResultado. Nessa situação,
+  // o único modo seguro de confirmar o resultado é consultar os itens da compra.
+  // Revogada/anulada/suspensa não significam que houve resultado.
+  return hasResultFlag !== false || homologatedValue > 0;
 }
 
 async function summarizeWithNvidia(lead) {
@@ -587,21 +735,12 @@ async function searchPncp(filters) {
 
   for (const range of ranges) {
     try {
-      const windowContracts = await fetchPaginated("/v1/contratacoes/atualizacao", {
-        dataInicial: range.dataInicial.replaceAll("-", ""),
-        dataFinal: range.dataFinal.replaceAll("-", ""),
-        codigoModalidadeContratacao: filters.modalidade === "todos" ? PNCP_MODALIDADE_PREGAO_ELETRONICO : filters.modalidade,
-        ...(hasFilterValue(filters.modoDisputa) ? { codigoModoDisputa: filters.modoDisputa } : {}),
-        ...(filters.uf ? { uf: filters.uf } : {}),
-        ...(filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {}),
-        ...(hasFilterValue(filters.orgao) && /^\d{14}$/.test(cleanDigits(filters.orgao)) ? { cnpj: cleanDigits(filters.orgao) } : {}),
-        ...(hasFilterValue(filters.unidade) && !/\s/.test(filters.unidade) ? { codigoUnidadeAdministrativa: filters.unidade } : {})
-      }, {
-        pageSize: 50,
-        maxPages: PNCP_UPDATE_MAX_PAGES,
-        maxItems: MAX_CONTRATACOES
-      });
+      const { contracts: windowContracts, errors } = await fetchContractsForWindow(filters, range);
       contracts.push(...windowContracts);
+      for (const error of errors) {
+        console.warn(`Fonte PNCP indisponível (${range.dataInicial} a ${range.dataFinal}):`, error.message);
+      }
+      if (!windowContracts.length && errors.length) lastWindowError = errors.at(-1);
     } catch (error) {
       lastWindowError = error;
       console.warn(`Janela PNCP indisponível (${range.dataInicial} a ${range.dataFinal}):`, error.message);
@@ -626,7 +765,7 @@ async function searchPncp(filters) {
 
     try {
       const items = await fetchItems(identity, contract);
-      const itemCandidates = items.filter((item) => item && item.temResultado !== false);
+      const itemCandidates = items.filter((item) => item && item.temResultado !== false && itemMatchesFilters(item, contract, filters));
       const itemResults = await mapWithConcurrency(itemCandidates, 4, async (item) => {
         try {
           const results = await fetchResults(identity, item);
@@ -636,6 +775,8 @@ async function searchPncp(filters) {
           return { item, results: [] };
         }
       });
+
+      if (!contractStatusMatchesWithItems(contract, filters.status, itemCandidates, itemResults)) return [];
 
       const losingRows = itemResults.flatMap(({ item, results }) => results.filter(isLosingResult).map((result) => ({ item, result })));
       if (!losingRows.length) return [];
