@@ -31,4 +31,4 @@ jobs:
             --request POST "${RENDER_URL%/}/api/buscar" \
             "${AUTH_HEADER[@]}" \
             -H "Content-Type: application/json" \
-            --data "{\"uf\":\"GO\",\"dataInicial\":\"${DATA_ANTERIOR}\",\"dataFinal\":\"${DATA_ANTERIOR}\"}"
+            --data "{\"escopo\":\"estado\",\"uf\":\"GO\",\"dataInicial\":\"${DATA_ANTERIOR}\",\"dataFinal\":\"${DATA_ANTERIOR}\"}"
