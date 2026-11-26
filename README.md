@@ -21,6 +21,9 @@ Abra `http://localhost:3000`.
 - `TELEGRAM_API_BASE_URL` (ou `TELEGRAM_API_URL`), `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`: envio do resumo da pesquisa para o Telegram.
 - `PORT`: porta HTTP, definida automaticamente pelo Render quando disponível.
 - `MAX_LEADS` e `PNCP_MAX_CONTRATACOES`: limites operacionais opcionais.
+- `MAX_SEARCH_DAYS`: limite do período informado pelo usuário; padrão de 366 dias. O backend divide automaticamente o período em janelas de até 31 dias para consultar o PNCP.
+- `PNCP_UPDATE_MAX_PAGES`: páginas consultadas por janela na API de atualização; padrão 10.
+- `PNCP_REQUEST_TIMEOUT_MS`: timeout de cada chamada ao PNCP, com nova tentativa automática em falhas transitórias; padrão 90000 ms.
 
 O webhook da planilha deve aceitar o lote enviado pela aplicação. Cada lead contém fornecedor, identificação, objeto, classificação, ocorrência, resumo da IA, órgão, data e link do PNCP. A implementação do webhook pode fazer `upsert` usando o campo `id`.
 
@@ -39,4 +42,4 @@ Configure as variáveis do `.env.example` no painel do Render. O código não de
 
 ## Workflow diário
 
-`.github/workflows/cron-diario.yml` roda às 10:00 UTC (07:00 em Brasília), envia `UF=GO` e pesquisa o dia anterior. Se `CRON_SECRET` estiver definido no GitHub e no Render, o workflow também envia o header `Authorization: Bearer ...`.
+`.github/workflows/cron-diario.yml` roda às 10:00 UTC (07:00 em Brasília), envia `escopo=estado`, `UF=GO` e pesquisa o dia anterior. Se `CRON_SECRET` estiver definido no GitHub e no Render, o workflow também envia o header `Authorization: Bearer ...`.
