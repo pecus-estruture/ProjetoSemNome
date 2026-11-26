@@ -64,7 +64,8 @@
       .filters-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
       .filters-head h3, .leads-head h3 { margin: 0; font-size: 1rem; }
       .filters-head span { color: var(--muted); font-size: .82rem; }
-      .filter-grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 13px; align-items: end; }
+      .filter-grid { display: grid; grid-template-columns: 1fr .85fr 1.25fr .95fr .95fr auto; gap: 13px; align-items: end; }
+      .hidden { display: none !important; }
       label { display: grid; gap: 8px; color: #e0e8f1; font-size: .76rem; font-weight: 700; letter-spacing: .02em; }
       input, select { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 12px; outline: none; color: var(--ink); background: var(--field); font: inherit; color-scheme: dark; transition: border-color .2s, box-shadow .2s; }
       input::placeholder { color: #b5c3d2; }
@@ -142,13 +143,26 @@
         <section class="card filters">
           <div class="filters-head">
             <h3>Nova pesquisa</h3>
-            <span>O período máximo é de 31 dias</span>
+            <span>Pesquise por cidade, estado ou esfera federal</span>
           </div>
           <form id="searchForm" class="filter-grid">
-            <label>Estado (UF)
+            <label>Abrangência
+              <select id="escopo" name="escopo">
+                <option value="estado" selected>Estado</option>
+                <option value="cidade">Cidade</option>
+                <option value="federal">Federal</option>
+              </select>
+            </label>
+            <label id="ufField">Estado (UF)
               <select id="uf" name="uf">
                 <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option selected>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
               </select>
+            </label>
+            <label id="cityField" class="hidden">Cidade
+              <input id="cidade" name="cidade" type="text" placeholder="Ex.: Goiânia" />
+            </label>
+            <label id="ibgeField" class="hidden">Código IBGE (opcional)
+              <input id="codigoMunicipioIbge" name="codigoMunicipioIbge" type="text" inputmode="numeric" maxlength="7" placeholder="7 dígitos" />
             </label>
             <label>Data inicial
               <input id="dataInicial" name="dataInicial" type="date" required />
@@ -162,7 +176,7 @@
 
         <section class="metrics" aria-label="Resumo dos leads">
           <div class="card metric"><small>Leads exibidos</small><strong id="metricLeads">—</strong></div>
-          <div class="card metric"><small>Estado consultado</small><strong id="metricUf">GO</strong></div>
+          <div class="card metric"><small>Abrangência consultada</small><strong id="metricUf">Estado · GO</strong></div>
           <div class="card metric"><small>Última atualização</small><strong id="metricUpdated">—</strong></div>
         </section>
 
@@ -191,6 +205,11 @@
       const body = document.querySelector('#leadsBody');
       const button = document.querySelector('#searchButton');
       const toast = document.querySelector('#toast');
+      const scopeSelect = document.querySelector('#escopo');
+      const ufField = document.querySelector('#ufField');
+      const cityField = document.querySelector('#cityField');
+      const ibgeField = document.querySelector('#ibgeField');
+      const ufInput = document.querySelector('#uf');
       let toastTimer;
       let leads = [];
 
@@ -203,6 +222,16 @@
         const parsed = new Date(value);
         return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString('pt-BR');
       };
+
+      function updateScopeFields() {
+        const scope = scopeSelect.value;
+        const isCity = scope === 'cidade';
+        const isFederal = scope === 'federal';
+        ufField.classList.toggle('hidden', isFederal);
+        cityField.classList.toggle('hidden', !isCity);
+        ibgeField.classList.toggle('hidden', !isCity);
+        ufInput.disabled = isFederal;
+      }
 
       function showToast(message, isError = false) {
         clearTimeout(toastTimer);
@@ -246,7 +275,7 @@
           const classification = field(lead, 'classificacao', 'classification');
           return `<tr>
             <td><span class="supplier">${escapeHtml(supplier)}</span>${cnpj ? `<span class="subtle">${escapeHtml(cnpj)}</span>` : ''}</td>
-            <td>${escapeHtml(object)}<span class="subtle">${escapeHtml(field(lead, 'orgao', 'agency') || 'Órgão não informado')} · ${escapeHtml(dateLabel(field(lead, 'dataPublicacao', 'publishedAt')))}</span></td>
+            <td>${escapeHtml(object)}<span class="subtle">${escapeHtml(field(lead, 'orgao', 'agency') || 'Órgão não informado')} · ${escapeHtml(field(lead, 'cidade', 'municipioNome', 'esfera') || field(lead, 'uf') || 'Local não informado')} · ${escapeHtml(dateLabel(field(lead, 'dataPublicacao', 'publishedAt')))}</span></td>
             <td><span class="tag">${escapeHtml(classification ? `${classification}º lugar` : 'Não vencedor')}</span><span class="subtle">${escapeHtml(occurrence)}</span></td>
             <td class="ai-summary">${escapeHtml(summary)}</td>
             <td><button class="secondary-button" data-copy-index="${index}" type="button">Copiar abordagem</button></td>
@@ -279,7 +308,8 @@
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error(data.error || 'Não foi possível concluir a pesquisa.');
           renderLeads(data.leads || []);
-          document.querySelector('#metricUf').textContent = payload.uf;
+          const scopeLabel = payload.escopo === 'cidade' ? `Cidade · ${payload.cidade || payload.codigoMunicipioIbge}` : payload.escopo === 'federal' ? 'Federal' : `Estado · ${payload.uf}`;
+          document.querySelector('#metricUf').textContent = scopeLabel;
           document.querySelector('#metricUpdated').textContent = 'Agora';
           showToast(`${data.total || 0} lead${data.total === 1 ? '' : 's'} encontrado${data.total === 1 ? '' : 's'}.`);
         } catch (error) {
@@ -295,6 +325,8 @@
       weekAgo.setDate(today.getDate() - 7);
       document.querySelector('#dataInicial').value = isoDate(weekAgo);
       document.querySelector('#dataFinal').value = isoDate(today);
+      scopeSelect.addEventListener('change', updateScopeFields);
+      updateScopeFields();
       renderLeads([]);
       loadLeads();
     </script>
