@@ -29,6 +29,8 @@ Abra `http://localhost:3000`.
 - `PNCP_UPDATE_FALLBACK_TIMEOUT_MS`: tempo para aguardar a rota de atualização antes de usar a publicação como fallback; padrão 15000 ms.
 - `PNCP_PUBLICATION_TIMEOUT_MS`: timeout da consulta de publicação usada como fallback; padrão 30000 ms.
 - `PNCP_DATA_REQUEST_TIMEOUT_MS`: timeout das consultas de itens, resultados e histórico; padrão 20000 ms.
+- `PNCP_MIN_INTERVAL_MS`: intervalo mínimo entre o início de chamadas ao PNCP; padrão 250 ms.
+- `PNCP_RATE_LIMIT_COOLDOWN_MS`: pausa aplicada depois de uma resposta HTTP 429 do PNCP; padrão 10000 ms.
 - `IBGE_API_BASE_URL`: base usada pelo backend para carregar municípios conforme a UF selecionada; padrão `https://servicodados.ibge.gov.br/api/v1/localidades/estados`.
 
 O webhook da planilha deve aceitar o lote enviado pela aplicação. Cada lead contém fornecedor, identificação, objeto, classificação, ocorrência, resumo da IA, órgão, data e link do PNCP. A implementação do webhook pode fazer `upsert` usando o campo `id`.
