@@ -26,15 +26,18 @@ const TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID");
 const MAX_LEADS = Math.max(1, Number(process.env.MAX_LEADS || 200));
 const MAX_CONTRATACOES = Math.max(1, Number(process.env.PNCP_MAX_CONTRATACOES || 300));
-const MAX_SEARCH_DAYS = Math.max(31, Number(process.env.MAX_SEARCH_DAYS || 366));
+const MAX_SEARCH_DAYS = Math.max(31, Number(process.env.MAX_SEARCH_DAYS || 730));
 const PNCP_DATE_WINDOW_DAYS = 31;
 const PNCP_UPDATE_MAX_PAGES = Math.max(1, Number(process.env.PNCP_UPDATE_MAX_PAGES || 20));
 const PNCP_REQUEST_TIMEOUT_MS = Math.max(30000, Number(process.env.PNCP_REQUEST_TIMEOUT_MS || 90000));
 const PNCP_PUBLICATION_FALLBACK = env("PNCP_PUBLICATION_FALLBACK") !== "false";
-const PNCP_UPDATE_FALLBACK_TIMEOUT_MS = Math.max(10000, Number(process.env.PNCP_UPDATE_FALLBACK_TIMEOUT_MS || 25000));
+const PNCP_UPDATE_FALLBACK_TIMEOUT_MS = Math.max(10000, Number(process.env.PNCP_UPDATE_FALLBACK_TIMEOUT_MS || 15000));
+const PNCP_PUBLICATION_TIMEOUT_MS = Math.max(15000, Number(process.env.PNCP_PUBLICATION_TIMEOUT_MS || 30000));
+const PNCP_DATA_REQUEST_TIMEOUT_MS = Math.max(10000, Number(process.env.PNCP_DATA_REQUEST_TIMEOUT_MS || 20000));
 const PNCP_MODALIDADE_PREGAO_ELETRONICO = 6;
 const IBGE_API_BASE_URL = (env("IBGE_API_BASE_URL") || "https://servicodados.ibge.gov.br/api/v1/localidades/estados").replace(/\/+$/, "");
 const municipalityCache = new Map();
+let nvidiaSkippedLogged = false;
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -200,8 +203,8 @@ async function requestWithRetry(url, options = {}, timeoutMs = 30000, attempts =
   throw lastError;
 }
 
-async function pncpRequest(url) {
-  return requestWithRetry(url, {}, PNCP_REQUEST_TIMEOUT_MS, 2);
+async function pncpRequest(url, { timeoutMs = PNCP_REQUEST_TIMEOUT_MS, attempts = 2 } = {}) {
+  return requestWithRetry(url, {}, timeoutMs, attempts);
 }
 
 async function settleWithin(promise, timeoutMs) {
@@ -378,7 +381,7 @@ function getContractIdentity(contract) {
   return { cnpj, ano: String(ano), sequencial: String(sequencial) };
 }
 
-async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, maxItems = Infinity, baseUrl = PNCP_API_BASE_URL } = {}) {
+async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, maxItems = Infinity, baseUrl = PNCP_API_BASE_URL, timeoutMs = PNCP_REQUEST_TIMEOUT_MS, attempts = 2 } = {}) {
   const output = [];
   for (let page = 1; page <= maxPages && output.length < maxItems; page += 1) {
     const url = makeUrl(baseUrl, pathname, {
@@ -386,7 +389,7 @@ async function fetchPaginated(pathname, params, { pageSize = 50, maxPages = 10, 
       pagina: page,
       tamanhoPagina: pageSize
     });
-    const { body } = await pncpRequest(url);
+    const { body } = await pncpRequest(url, { timeoutMs, attempts });
     const rows = asList(body);
     output.push(...rows);
 
@@ -403,7 +406,8 @@ async function fetchItems(identity, contract) {
     pageSize: 50,
     maxPages: 20,
     maxItems: 2000,
-    baseUrl: PNCP_DATA_API_BASE_URL
+    baseUrl: PNCP_DATA_API_BASE_URL,
+    timeoutMs: PNCP_DATA_REQUEST_TIMEOUT_MS
   });
 }
 
@@ -415,14 +419,14 @@ async function fetchResults(identity, item) {
     PNCP_DATA_API_BASE_URL,
     `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/itens/${numeroItem}/resultados`
   );
-  const { body } = await pncpRequest(url);
+  const { body } = await pncpRequest(url, { timeoutMs: PNCP_DATA_REQUEST_TIMEOUT_MS });
   return asList(body, ["listaResultados", "resultados"]);
 }
 
 async function fetchHistory(identity) {
   try {
     const url = makeUrl(PNCP_DATA_API_BASE_URL, `/orgaos/${identity.cnpj}/compras/${identity.ano}/${identity.sequencial}/historico`);
-    const { body } = await pncpRequest(url);
+    const { body } = await pncpRequest(url, { timeoutMs: PNCP_DATA_REQUEST_TIMEOUT_MS });
     return asList(body, ["historico", "historicos", "logs"]);
   } catch (error) {
     console.warn("Histórico PNCP indisponível:", error.message);
@@ -548,18 +552,22 @@ async function fetchContractsForWindow(filters, range) {
   const updatePromise = fetchPaginated("/v1/contratacoes/atualizacao", params, {
     pageSize: 50,
     maxPages: PNCP_UPDATE_MAX_PAGES,
-    maxItems: MAX_CONTRATACOES
+    maxItems: MAX_CONTRATACOES,
+    timeoutMs: PNCP_UPDATE_FALLBACK_TIMEOUT_MS,
+    attempts: 1
   });
   const publicationPromise = PNCP_PUBLICATION_FALLBACK
     ? fetchPaginated("/v1/contratacoes/publicacao", publicationParams, {
       pageSize: 50,
       maxPages: PNCP_UPDATE_MAX_PAGES,
-      maxItems: MAX_CONTRATACOES
+      maxItems: MAX_CONTRATACOES,
+      timeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
+      attempts: 1
     })
     : Promise.resolve([]);
 
   const updateResult = await settleWithin(updatePromise, PNCP_UPDATE_FALLBACK_TIMEOUT_MS);
-  const publicationResult = await settleWithin(publicationPromise, PNCP_REQUEST_TIMEOUT_MS);
+  const publicationResult = await settleWithin(publicationPromise, PNCP_PUBLICATION_TIMEOUT_MS);
   const contracts = [];
   const errors = [];
 
@@ -682,14 +690,27 @@ function purchaseHasResultOrIsFinished(contract) {
   const hasResultFlag = booleanValue(firstValue(contract, ["existeResultado", "temResultado", "temResultados", "possuiResultado"]));
   const homologatedValue = Number(firstValue(contract, ["valorTotalHomologado", "valorHomologado"]));
 
-  // A listagem de atualização nem sempre traz existeResultado. Nessa situação,
-  // o único modo seguro de confirmar o resultado é consultar os itens da compra.
-  // Revogada/anulada/suspensa não significam que houve resultado.
-  return hasResultFlag !== false || homologatedValue > 0;
+  if (hasResultFlag === false) return false;
+  if (hasResultFlag === true || homologatedValue > 0) return true;
+
+  // As listagens públicas nem sempre trazem existeResultado. Se o encerramento
+  // da proposta ainda está no futuro, a contratação não pode gerar fornecedor
+  // não vencedor; isso evita centenas de chamadas inúteis no escopo federal.
+  const closing = Date.parse(String(firstValue(contract, ["dataEncerramentoProposta"]) || ""));
+  return !Number.isFinite(closing) || closing <= Date.now();
 }
 
 async function summarizeWithNvidia(lead) {
-  if (!NVIDIA_API_KEY) return fallbackSummary(lead);
+  if (!NVIDIA_API_KEY) {
+    if (!nvidiaSkippedLogged) {
+      console.warn("[NVIDIA] resumo ignorado: NVIDIA_API_KEY não configurada; usando fallback local.");
+      nvidiaSkippedLogged = true;
+    }
+    return fallbackSummary(lead);
+  }
+
+  const startedAt = Date.now();
+  console.log(`[NVIDIA] iniciando resumo lead=${lead.id} modelo=${NVIDIA_MODEL}`);
 
   const prompt = [
     "Resuma em uma única frase, em português do Brasil, por que o fornecedor não venceu a licitação.",
@@ -701,7 +722,7 @@ async function summarizeWithNvidia(lead) {
   ].join("\n");
 
   try {
-    const { body } = await request(NVIDIA_API_URL, {
+    const { status, body } = await request(NVIDIA_API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${NVIDIA_API_KEY}`,
@@ -719,11 +740,16 @@ async function summarizeWithNvidia(lead) {
     }, 30000);
 
     const content = body?.choices?.[0]?.message?.content;
-    if (!content) return fallbackSummary(lead);
+    if (!content) {
+      console.warn(`[NVIDIA] resposta sem conteúdo lead=${lead.id} status=${status} ms=${Date.now() - startedAt}; usando fallback local.`);
+      return fallbackSummary(lead);
+    }
     const summary = String(content).replace(/\s+/g, " ").trim().replace(/^[-•]\s*/, "");
-    return summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
+    const normalizedSummary = summary.length > 260 ? `${summary.slice(0, 257).replace(/\s+\S*$/, "")}...` : summary;
+    console.log(`[NVIDIA] resumo concluído lead=${lead.id} status=${status} ms=${Date.now() - startedAt}`);
+    return normalizedSummary;
   } catch (error) {
-    console.warn("Resumo NVIDIA indisponível:", error.message);
+    console.warn(`[NVIDIA] falha lead=${lead.id} ms=${Date.now() - startedAt} status=${error.status || "na"}: ${error.message}; usando fallback local.`);
     return fallbackSummary(lead);
   }
 }
@@ -878,6 +904,10 @@ app.get("/api/health", (_req, res) => {
     config: {
       pncp: Boolean(PNCP_API_BASE_URL),
       pncpData: Boolean(PNCP_DATA_API_BASE_URL),
+      maxSearchDays: MAX_SEARCH_DAYS,
+      pncpPublicationFallback: PNCP_PUBLICATION_FALLBACK,
+      pncpUpdateFallbackTimeoutMs: PNCP_UPDATE_FALLBACK_TIMEOUT_MS,
+      pncpPublicationTimeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
       ibge: Boolean(IBGE_API_BASE_URL),
       nvidia: Boolean(NVIDIA_API_KEY),
       googleSheets: Boolean(GOOGLE_SHEETS_WEBHOOK_URL),
@@ -936,7 +966,9 @@ app.use((error, _req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`PECUS Consultoria em Licitações disponível em http://localhost:${PORT}`);
+  console.log(`[NVIDIA] configuração key=${NVIDIA_API_KEY ? "configurada" : "ausente"} modelo=${NVIDIA_MODEL} url=${safeUrlForLog(NVIDIA_API_URL)}`);
 });
+
 
 
 
