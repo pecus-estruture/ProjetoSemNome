@@ -36,6 +36,7 @@ const PNCP_PUBLICATION_TIMEOUT_MS = Math.max(15000, Number(process.env.PNCP_PUBL
 const PNCP_DATA_REQUEST_TIMEOUT_MS = Math.max(10000, Number(process.env.PNCP_DATA_REQUEST_TIMEOUT_MS || 20000));
 const PNCP_MIN_INTERVAL_MS = Math.max(0, Number(process.env.PNCP_MIN_INTERVAL_MS || 250));
 const PNCP_RATE_LIMIT_COOLDOWN_MS = Math.max(1000, Number(process.env.PNCP_RATE_LIMIT_COOLDOWN_MS || 10000));
+const PNCP_PRIMARY_SOURCE = env("PNCP_PRIMARY_SOURCE") === "atualizacao" ? "atualizacao" : "publicacao";
 const PNCP_MODALIDADE_PREGAO_ELETRONICO = 6;
 const IBGE_API_BASE_URL = (env("IBGE_API_BASE_URL") || "https://servicodados.ibge.gov.br/api/v1/localidades/estados").replace(/\/+$/, "");
 const municipalityCache = new Map();
@@ -580,48 +581,63 @@ async function fetchContractsForWindow(filters, range) {
   const publicationParams = { ...params };
   delete publicationParams.codigoModoDisputa;
 
-  const updatePromise = fetchPaginated("/v1/contratacoes/atualizacao", params, {
-    pageSize: 50,
-    maxPages: PNCP_UPDATE_MAX_PAGES,
-    maxItems: MAX_CONTRATACOES,
-    timeoutMs: PNCP_UPDATE_FALLBACK_TIMEOUT_MS,
-    attempts: 1
-  });
-  const updateResult = await settleWithin(updatePromise, PNCP_UPDATE_FALLBACK_TIMEOUT_MS);
-  if (updateResult.status === "fulfilled" && updateResult.value.length) {
-    return { contracts: updateResult.value, errors: [] };
+  const sourceRequests = {
+    publicacao: {
+      pathname: "/v1/contratacoes/publicacao",
+      params: publicationParams,
+      timeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
+      timeoutMessage: "A consulta de publicação do PNCP excedeu o tempo limite."
+    },
+    atualizacao: {
+      pathname: "/v1/contratacoes/atualizacao",
+      params,
+      timeoutMs: PNCP_UPDATE_FALLBACK_TIMEOUT_MS,
+      timeoutMessage: "A consulta de atualização do PNCP excedeu o tempo de fallback."
+    }
+  };
+  const primaryName = PNCP_PRIMARY_SOURCE;
+  const fallbackName = primaryName === "publicacao" ? "atualizacao" : "publicacao";
+  const sourceResult = async (name) => {
+    const source = sourceRequests[name];
+    const result = await settleWithin(fetchPaginated(source.pathname, source.params, {
+      pageSize: 50,
+      maxPages: PNCP_UPDATE_MAX_PAGES,
+      maxItems: MAX_CONTRATACOES,
+      timeoutMs: source.timeoutMs,
+      attempts: 1
+    }), source.timeoutMs);
+    return { name, source, result };
+  };
+
+  // A publicação é mais adequada para pesquisas históricas. As fontes são
+  // consultadas em sequência para não dobrar a carga no PNCP nem gerar 429.
+  const primary = await sourceResult(primaryName);
+  if (primary.result.status === "fulfilled" && primary.result.value.length) {
+    return { contracts: primary.result.value, errors: [] };
   }
 
   if (!PNCP_PUBLICATION_FALLBACK) {
     return {
-      contracts: updateResult.status === "fulfilled" ? updateResult.value : [],
-      errors: updateResult.status === "timedout"
-        ? [httpError("A consulta de atualização do PNCP excedeu o tempo de fallback.", 504)]
-        : updateResult.status === "rejected" ? [updateResult.reason] : []
+      contracts: primary.result.status === "fulfilled" ? primary.result.value : [],
+      errors: [sourceError(primary)].filter(Boolean)
     };
   }
 
-  // O fallback é deliberadamente sequencial. Consultar atualização e publicação
-  // ao mesmo tempo duplica a carga e faz o PNCP responder 429 em pesquisas longas.
-  const publicationResult = await settleWithin(fetchPaginated("/v1/contratacoes/publicacao", publicationParams, {
-    pageSize: 50,
-    maxPages: PNCP_UPDATE_MAX_PAGES,
-    maxItems: MAX_CONTRATACOES,
-    timeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
-    attempts: 1
-  }), PNCP_PUBLICATION_TIMEOUT_MS);
-
-  if (publicationResult.status === "fulfilled") {
-    return { contracts: publicationResult.value, errors: [] };
+  const fallback = await sourceResult(fallbackName);
+  if (fallback.result.status === "fulfilled") {
+    return { contracts: fallback.result.value, errors: [] };
   }
 
-  const updateError = updateResult.status === "timedout"
-    ? httpError("A consulta de atualização do PNCP excedeu o tempo de fallback.", 504)
-    : updateResult.status === "rejected" ? updateResult.reason : null;
-  const publicationError = publicationResult.status === "timedout"
-    ? httpError("A consulta de publicação do PNCP excedeu o tempo limite.", 504)
-    : publicationResult.reason;
-  return { contracts: [], errors: [updateError, publicationError].filter(Boolean) };
+  return {
+    contracts: [],
+    errors: [sourceError(primary), sourceError(fallback)].filter(Boolean)
+  };
+}
+
+function sourceError(sourceResult) {
+  if (sourceResult.result.status === "timedout") return httpError(sourceResult.source.timeoutMessage, 504);
+  if (sourceResult.result.status === "rejected") return sourceResult.result.reason;
+  return null;
 }
 
 function contractMatchesScope(contract, filters) {
@@ -948,6 +964,7 @@ app.get("/api/health", (_req, res) => {
       pncpPublicationTimeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
       pncpMinIntervalMs: PNCP_MIN_INTERVAL_MS,
       pncpRateLimitCooldownMs: PNCP_RATE_LIMIT_COOLDOWN_MS,
+      pncpPrimarySource: PNCP_PRIMARY_SOURCE,
       ibge: Boolean(IBGE_API_BASE_URL),
       nvidia: Boolean(NVIDIA_API_KEY),
       googleSheets: Boolean(GOOGLE_SHEETS_WEBHOOK_URL),
