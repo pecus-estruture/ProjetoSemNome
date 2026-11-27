@@ -946,6 +946,8 @@ app.get("/api/health", (_req, res) => {
       pncpPublicationFallback: PNCP_PUBLICATION_FALLBACK,
       pncpUpdateFallbackTimeoutMs: PNCP_UPDATE_FALLBACK_TIMEOUT_MS,
       pncpPublicationTimeoutMs: PNCP_PUBLICATION_TIMEOUT_MS,
+      pncpMinIntervalMs: PNCP_MIN_INTERVAL_MS,
+      pncpRateLimitCooldownMs: PNCP_RATE_LIMIT_COOLDOWN_MS,
       ibge: Boolean(IBGE_API_BASE_URL),
       nvidia: Boolean(NVIDIA_API_KEY),
       googleSheets: Boolean(GOOGLE_SHEETS_WEBHOOK_URL),
