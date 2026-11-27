@@ -203,7 +203,7 @@
               <input name="unidade" type="search" placeholder="Nome ou código" />
             </label>
             <label>Esferas
-              <select name="esfera"><option value="">Selecione</option><option value="federal">Federal</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option><option value="distrital">Distrital</option><option value="todos">Todos</option></select>
+              <select id="esferaFilter" name="esfera"><option value="">Selecione</option><option value="federal">Federal</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option><option value="distrital">Distrital</option><option value="todos">Todos</option></select>
             </label>
             <label>Poderes
               <select name="poder"><option value="">Selecione</option><option value="executivo">Executivo</option><option value="legislativo">Legislativo</option><option value="judiciario">Judiciário</option><option value="ministerio publico">Ministério Público</option><option value="defensoria">Defensoria</option><option value="tribunal de contas">Tribunal de Contas</option><option value="todos">Todos</option></select>
@@ -275,6 +275,7 @@
       const ufInput = document.querySelector('#uf');
       const cityInput = document.querySelector('#cidade');
       const ibgeInput = document.querySelector('#codigoMunicipioIbge');
+      const sphereFilter = document.querySelector('#esferaFilter');
       let toastTimer;
       let leads = [];
 
@@ -288,6 +289,31 @@
         return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString('pt-BR');
       };
 
+      const sphereLabels = {
+        federal: 'Federal',
+        estadual: 'Estadual',
+        municipal: 'Municipal',
+        distrital: 'Distrital'
+      };
+
+      function coverageLabel(source = {}) {
+        const scope = source.escopo || scopeSelect.value;
+        const uf = source.uf || ufInput.value;
+        const city = source.cidade || cityInput.value || source.codigoMunicipioIbge || ibgeInput.value;
+        const sphere = source.esfera || sphereFilter.value;
+        const base = scope === 'cidade'
+          ? `Cidade · ${city || uf || 'não selecionada'}`
+          : scope === 'federal'
+            ? 'Federal'
+            : `Estado · ${uf || 'não selecionado'}`;
+        const sphereLabel = sphereLabels[String(sphere).toLowerCase()];
+        return sphereLabel && sphereLabel !== base ? `${base} · Esfera ${sphereLabel}` : base;
+      }
+
+      function updateCoverageMetric(source = {}) {
+        document.querySelector('#metricUf').textContent = coverageLabel(source);
+      }
+
       function updateScopeFields() {
         const scope = scopeSelect.value;
         const isCity = scope === 'cidade';
@@ -297,6 +323,7 @@
         ufInput.disabled = isFederal;
         cityInput.disabled = !isCity;
         if (isCity) loadMunicipios(ufInput.value);
+        updateCoverageMetric();
       }
 
       async function loadMunicipios(uf) {
@@ -392,8 +419,7 @@
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error(data.error || 'Não foi possível concluir a pesquisa.');
           renderLeads(data.leads || []);
-          const scopeLabel = payload.escopo === 'cidade' ? `Cidade · ${payload.cidade || payload.codigoMunicipioIbge}` : payload.escopo === 'federal' ? 'Federal' : `Estado · ${payload.uf}`;
-          document.querySelector('#metricUf').textContent = scopeLabel;
+          updateCoverageMetric(data.filtros || payload);
           document.querySelector('#metricUpdated').textContent = 'Agora';
           showToast(`${data.total || 0} lead${data.total === 1 ? '' : 's'} encontrado${data.total === 1 ? '' : 's'}.`);
         } catch (error) {
@@ -410,14 +436,22 @@
       document.querySelector('#dataInicial').value = isoDate(weekAgo);
       document.querySelector('#dataFinal').value = isoDate(today);
       scopeSelect.addEventListener('change', updateScopeFields);
-      ufInput.addEventListener('change', () => { if (scopeSelect.value === 'cidade') loadMunicipios(ufInput.value); });
-      cityInput.addEventListener('change', () => { ibgeInput.value = cityInput.selectedOptions[0]?.dataset.codigo || ''; });
+      ufInput.addEventListener('change', () => {
+        if (scopeSelect.value === 'cidade') loadMunicipios(ufInput.value);
+        updateCoverageMetric();
+      });
+      cityInput.addEventListener('change', () => {
+        ibgeInput.value = cityInput.selectedOptions[0]?.dataset.codigo || '';
+        updateCoverageMetric();
+      });
+      sphereFilter.addEventListener('change', () => updateCoverageMetric());
       updateScopeFields();
       renderLeads([]);
       loadLeads();
     </script>
   </body>
 </html>
+
 
 
 
